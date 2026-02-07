@@ -9,12 +9,27 @@ import com.intellij.psi.PsiType
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.psi.search.searches.ClassInheritorsSearch
 
+data class ResolutionResult(
+    val injectionPoint: InjectionPoint,
+    val typeMatched: List<KoraProvider>,
+    val tagMatched: List<KoraProvider>,
+)
+
 object KoraProviderResolver {
 
     private val LOG = Logger.getInstance(KoraProviderResolver::class.java)
 
     fun resolve(element: PsiElement): List<PsiElement> {
-        val injectionPoint = InjectionPointDetector.detect(element) ?: return emptyList()
+        val result = resolveDetailed(element) ?: return emptyList()
+        val matched = result.tagMatched
+        if (matched.isEmpty()) return emptyList()
+        val elements = matched.map { it.element }
+        val methods = elements.filterIsInstance<PsiMethod>()
+        return methods.ifEmpty { elements }
+    }
+
+    fun resolveDetailed(element: PsiElement): ResolutionResult? {
+        val injectionPoint = InjectionPointDetector.detect(element) ?: return null
         val project = element.project
 
         val allProviders = resolveViaIndex(injectionPoint, project)
@@ -23,18 +38,17 @@ object KoraProviderResolver {
         val typeMatched = allProviders.filter { matchesType(injectionPoint, it) }
         LOG.info("After type filter: ${typeMatched.size} (required: ${injectionPoint.requiredType.canonicalText})")
 
-        val result = typeMatched.filter { matchesTags(injectionPoint, it) }
-        LOG.info("After tag filter: ${result.size}")
+        val tagMatched = typeMatched.filter { matchesTags(injectionPoint, it) }
+        LOG.info("After tag filter: ${tagMatched.size}")
 
         // If index-backed search found nothing, fall back to full scan (for unannotated parent modules)
-        if (result.isEmpty()) {
+        if (tagMatched.isEmpty()) {
             LOG.info("No results, falling back to full scan")
-            return resolveWithFullScan(injectionPoint, project)
+            val fallback = resolveWithFullScanDetailed(injectionPoint, project)
+            if (fallback != null) return fallback
         }
 
-        val elements = result.map { it.element }
-        val methods = elements.filterIsInstance<PsiMethod>()
-        return methods.ifEmpty { elements }
+        return ResolutionResult(injectionPoint, typeMatched, tagMatched)
     }
 
     /**
@@ -75,20 +89,18 @@ object KoraProviderResolver {
         return ProviderSearch.findAllProviders(project)
     }
 
-    private fun resolveWithFullScan(injectionPoint: InjectionPoint, project: com.intellij.openapi.project.Project): List<PsiElement> {
+    private fun resolveWithFullScanDetailed(injectionPoint: InjectionPoint, project: com.intellij.openapi.project.Project): ResolutionResult? {
         val providers = ProviderSearch.findAllProviders(project)
         val typeMatched = providers.filter { matchesType(injectionPoint, it) }
-        val result = typeMatched.filter { matchesTags(injectionPoint, it) }
-        if (result.isNotEmpty()) {
-            LOG.info("Fallback found ${result.size} providers")
-            val elements = result.map { it.element }
-            val methods = elements.filterIsInstance<PsiMethod>()
-            return methods.ifEmpty { elements }
+        val tagMatched = typeMatched.filter { matchesTags(injectionPoint, it) }
+        if (tagMatched.isNotEmpty()) {
+            LOG.info("Fallback found ${tagMatched.size} providers")
+            return ResolutionResult(injectionPoint, typeMatched, tagMatched)
         }
-        return emptyList()
+        return null
     }
 
-    private fun matchesType(injectionPoint: InjectionPoint, provider: KoraProvider): Boolean {
+    internal fun matchesType(injectionPoint: InjectionPoint, provider: KoraProvider): Boolean {
         val requiredType = injectionPoint.requiredType
         val providedType = provider.providedType
 
@@ -143,7 +155,7 @@ object KoraProviderResolver {
         return false
     }
 
-    private fun matchesTags(injectionPoint: InjectionPoint, provider: KoraProvider): Boolean {
+    internal fun matchesTags(injectionPoint: InjectionPoint, provider: KoraProvider): Boolean {
         val required = injectionPoint.tagInfo
         val provided = provider.tagInfo
 

@@ -31,6 +31,15 @@
                 implementationClass="ru.dsudomoin.koraplugin.config.ConfigSourceLineMarkerProvider"/>
         <codeInsight.lineMarkerProvider language="kotlin"
                 implementationClass="ru.dsudomoin.koraplugin.config.ConfigSourceLineMarkerProvider"/>
+
+        <localInspection language="UAST" shortName="KoraNoProvider"
+                displayName="No provider found for injection point"
+                groupName="Kora" enabledByDefault="true" level="ERROR"
+                implementationClass="ru.dsudomoin.koraplugin.inspection.KoraNoProviderInspection"/>
+        <localInspection language="UAST" shortName="KoraMultipleProviders"
+                displayName="Multiple providers found for injection point"
+                groupName="Kora" enabledByDefault="true" level="WARNING"
+                implementationClass="ru.dsudomoin.koraplugin.inspection.KoraMultipleProvidersInspection"/>
     </extensions>
 
     <extensions defaultExtensionNs="org.jetbrains.kotlin">
