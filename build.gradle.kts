@@ -5,7 +5,12 @@ plugins {
 }
 
 group = "ru.dsudomoin"
-version = "1.0.0"
+version = providers.exec {
+    commandLine("git", "describe", "--tags", "--abbrev=0")
+    isIgnoreExitValue = true
+}.standardOutput.asText.map { text ->
+    text.trim().removePrefix("v").ifEmpty { "0.0.0-SNAPSHOT" }
+}.get()
 
 repositories {
     mavenCentral()
