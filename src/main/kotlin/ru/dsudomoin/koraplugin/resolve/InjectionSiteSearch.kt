@@ -14,8 +14,10 @@ import com.intellij.psi.util.CachedValuesManager
 import com.intellij.psi.util.PsiModificationTracker
 import org.jetbrains.uast.UClass
 import org.jetbrains.uast.UMethod
+import org.jetbrains.uast.UParameter
 import org.jetbrains.uast.toUElement
 import ru.dsudomoin.koraplugin.KoraAnnotations
+import ru.dsudomoin.koraplugin.index.KoraInjectionSiteIndex
 
 data class KoraInjectionSite(
     val element: PsiElement,
@@ -134,5 +136,56 @@ object InjectionSiteSearch {
             val tagInfo = TagExtractor.extractTags(param)
             result.add(KoraInjectionSite(nameElement, resolvedType, tagInfo, isAllOf))
         }
+    }
+
+    /**
+     * Index-backed lookup: find injection sites whose raw required-type FQN matches [typeFqn].
+     * Reconstructs PSI from index entries, extracts tags at query time.
+     */
+    fun findInjectionSitesByType(project: Project, typeFqn: String): List<KoraInjectionSite>? {
+        val scope = GlobalSearchScope.projectScope(project)
+        val entries = KoraInjectionSiteIndex.getSites(typeFqn, project, scope) ?: return null
+        if (entries.isEmpty()) return emptyList()
+
+        val allScope = GlobalSearchScope.allScope(project)
+        val facade = JavaPsiFacade.getInstance(project)
+        val result = mutableListOf<KoraInjectionSite>()
+
+        for (entry in entries) {
+            val psiClass = facade.findClass(entry.classFqn, allScope) ?: continue
+            val uMethod: UMethod? = if (entry.isConstructor) {
+                psiClass.constructors.firstOrNull()?.toUElement() as? UMethod
+            } else {
+                val methodName = entry.methodName ?: continue
+                psiClass.findMethodsByName(methodName, false).firstOrNull()?.toUElement() as? UMethod
+            }
+            if (uMethod == null) continue
+
+            val param = uMethod.uastParameters.find { it.name == entry.paramName } ?: continue
+            val paramPsi = param.sourcePsi ?: continue
+            val nameElement = when (paramPsi) {
+                is com.intellij.psi.PsiParameter -> paramPsi.nameIdentifier ?: paramPsi
+                else -> paramPsi
+            }
+            val (resolvedType, isAllOf) = InjectionPointDetector.unwrapType(param.type)
+            val tagInfo = TagExtractor.extractTags(param)
+            result.add(KoraInjectionSite(nameElement, resolvedType, tagInfo, isAllOf))
+        }
+
+        return result
+    }
+
+    /**
+     * Index-backed lookup for multiple type FQNs (e.g., provided type + its supertypes).
+     */
+    fun findInjectionSitesByTypes(project: Project, typeFqns: Collection<String>): List<KoraInjectionSite>? {
+        val result = mutableListOf<KoraInjectionSite>()
+        val seen = mutableSetOf<String>()
+        for (fqn in typeFqns) {
+            if (seen.add(fqn)) {
+                result.addAll(findInjectionSitesByType(project, fqn) ?: return null)
+            }
+        }
+        return result
     }
 }
