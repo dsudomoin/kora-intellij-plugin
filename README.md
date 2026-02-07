@@ -12,7 +12,7 @@ Provides Spring-like IDE navigation: jump from injection points directly to thei
 
 ### Features
 
-**Go to Declaration (Ctrl+B / Cmd+B)**
+**Go to Declaration**
 - Navigate from constructor parameters and factory method parameters to the component that provides them
 - Supports `@Component` classes, factory methods in `@KoraApp`, `@Module`, `@KoraSubmodule` interfaces
 - Resolves tag-based qualification: `@Tag`, custom meta-annotations, `@Tag.Any`
@@ -77,7 +77,7 @@ The plugin ZIP will be in `build/distributions/`.
 
 ### Возможности
 
-**Go to Declaration (Ctrl+B / Cmd+B)**
+**Go to Declaration**
 - Навигация от параметров конструктора и фабричных методов к компоненту-провайдеру
 - Поддержка `@Component` классов, фабричных методов в интерфейсах `@KoraApp`, `@Module`, `@KoraSubmodule`
 - Разрешение тегов: `@Tag`, кастомные мета-аннотации, `@Tag.Any`
