@@ -1,0 +1,465 @@
+package ru.dsudomoin.koraplugin
+
+import com.intellij.psi.PsiClass
+import com.intellij.psi.PsiMethod
+import com.intellij.testFramework.fixtures.BasePlatformTestCase
+import ru.dsudomoin.koraplugin.resolve.KoraProviderResolver
+
+class KoraGotoDeclarationHandlerTest : BasePlatformTestCase() {
+
+    override fun getTestDataPath(): String = "src/test/testData"
+
+    private fun configureAnnotations() {
+        myFixture.configureByFiles(
+            "ru/tinkoff/kora/common/Component.java",
+            "ru/tinkoff/kora/common/KoraApp.java",
+            "ru/tinkoff/kora/common/Module.java",
+            "ru/tinkoff/kora/common/KoraSubmodule.java",
+            "ru/tinkoff/kora/common/Tag.java",
+            "ru/tinkoff/kora/common/annotation/Generated.java",
+            "ru/tinkoff/kora/application/graph/All.java",
+        )
+    }
+
+    fun `test navigate from Component constructor parameter to Component provider`() {
+        configureAnnotations()
+
+        myFixture.addFileToProject(
+            "MyService.java",
+            """
+            public interface MyService {}
+            """.trimIndent(),
+        )
+
+        myFixture.addFileToProject(
+            "MyServiceImpl.java",
+            """
+            import ru.tinkoff.kora.common.Component;
+
+            @Component
+            public class MyServiceImpl implements MyService {
+                public MyServiceImpl() {}
+            }
+            """.trimIndent(),
+        )
+
+        myFixture.configureByText(
+            "MyController.java",
+            """
+            import ru.tinkoff.kora.common.Component;
+
+            @Component
+            public class MyController {
+                public MyController(MyService my<caret>Service) {}
+            }
+            """.trimIndent(),
+        )
+
+        val element = myFixture.file.findElementAt(myFixture.caretOffset)!!
+        val targets = KoraProviderResolver.resolve(element)
+
+        assertNotEmpty(targets)
+        assertTrue(
+            "Expected to navigate to MyServiceImpl",
+            targets.any { it is PsiClass && it.name == "MyServiceImpl" },
+        )
+    }
+
+    fun `test navigate from Module factory method parameter to provider`() {
+        configureAnnotations()
+
+        myFixture.addFileToProject(
+            "MyRepository.java",
+            """
+            public interface MyRepository {}
+            """.trimIndent(),
+        )
+
+        myFixture.addFileToProject(
+            "MyRepositoryImpl.java",
+            """
+            import ru.tinkoff.kora.common.Component;
+
+            @Component
+            public class MyRepositoryImpl implements MyRepository {
+                public MyRepositoryImpl() {}
+            }
+            """.trimIndent(),
+        )
+
+        myFixture.configureByText(
+            "MyModule.java",
+            """
+            import ru.tinkoff.kora.common.Module;
+
+            @Module
+            public interface MyModule {
+                default MyService createService(MyRepository my<caret>Repo) {
+                    return null;
+                }
+            }
+            """.trimIndent(),
+        )
+
+        val element = myFixture.file.findElementAt(myFixture.caretOffset)!!
+        val targets = KoraProviderResolver.resolve(element)
+
+        assertNotEmpty(targets)
+        assertTrue(
+            "Expected to navigate to MyRepositoryImpl",
+            targets.any { it is PsiClass && it.name == "MyRepositoryImpl" },
+        )
+    }
+
+    fun `test navigate with Tag filter`() {
+        configureAnnotations()
+
+        myFixture.addFileToProject(
+            "MyService.java",
+            """
+            public interface MyService {}
+            """.trimIndent(),
+        )
+
+        myFixture.addFileToProject(
+            "MyTag.java",
+            """
+            public class MyTag {}
+            """.trimIndent(),
+        )
+
+        myFixture.addFileToProject(
+            "TaggedServiceImpl.java",
+            """
+            import ru.tinkoff.kora.common.Component;
+            import ru.tinkoff.kora.common.Tag;
+
+            @Component
+            @Tag(MyTag.class)
+            public class TaggedServiceImpl implements MyService {
+                public TaggedServiceImpl() {}
+            }
+            """.trimIndent(),
+        )
+
+        myFixture.addFileToProject(
+            "UntaggedServiceImpl.java",
+            """
+            import ru.tinkoff.kora.common.Component;
+
+            @Component
+            public class UntaggedServiceImpl implements MyService {
+                public UntaggedServiceImpl() {}
+            }
+            """.trimIndent(),
+        )
+
+        myFixture.configureByText(
+            "MyConsumer.java",
+            """
+            import ru.tinkoff.kora.common.Component;
+            import ru.tinkoff.kora.common.Tag;
+
+            @Component
+            public class MyConsumer {
+                public MyConsumer(@Tag(MyTag.class) MyService my<caret>Service) {}
+            }
+            """.trimIndent(),
+        )
+
+        val element = myFixture.file.findElementAt(myFixture.caretOffset)!!
+        val targets = KoraProviderResolver.resolve(element)
+
+        assertNotEmpty(targets)
+        assertEquals("Should find only tagged provider", 1, targets.size)
+        assertTrue(
+            "Expected to navigate to TaggedServiceImpl",
+            targets.any { it is PsiClass && it.name == "TaggedServiceImpl" },
+        )
+    }
+
+    fun `test multiple candidates returned`() {
+        configureAnnotations()
+
+        myFixture.addFileToProject(
+            "MyService.java",
+            """
+            public interface MyService {}
+            """.trimIndent(),
+        )
+
+        myFixture.addFileToProject(
+            "ServiceImplA.java",
+            """
+            import ru.tinkoff.kora.common.Component;
+
+            @Component
+            public class ServiceImplA implements MyService {
+                public ServiceImplA() {}
+            }
+            """.trimIndent(),
+        )
+
+        myFixture.addFileToProject(
+            "ServiceImplB.java",
+            """
+            import ru.tinkoff.kora.common.Component;
+
+            @Component
+            public class ServiceImplB implements MyService {
+                public ServiceImplB() {}
+            }
+            """.trimIndent(),
+        )
+
+        myFixture.configureByText(
+            "MyConsumer.java",
+            """
+            import ru.tinkoff.kora.common.Component;
+            import ru.tinkoff.kora.common.Tag;
+
+            @Component
+            public class MyConsumer {
+                public MyConsumer(@Tag(Tag.Any.class) MyService my<caret>Service) {}
+            }
+            """.trimIndent(),
+        )
+
+        val element = myFixture.file.findElementAt(myFixture.caretOffset)!!
+        val targets = KoraProviderResolver.resolve(element)
+
+        assertTrue("Should find at least 2 providers", targets.size >= 2)
+    }
+
+    fun `test All type unwrapping`() {
+        configureAnnotations()
+
+        myFixture.addFileToProject(
+            "MyService.java",
+            """
+            public interface MyService {}
+            """.trimIndent(),
+        )
+
+        myFixture.addFileToProject(
+            "ServiceImplA.java",
+            """
+            import ru.tinkoff.kora.common.Component;
+
+            @Component
+            public class ServiceImplA implements MyService {
+                public ServiceImplA() {}
+            }
+            """.trimIndent(),
+        )
+
+        myFixture.addFileToProject(
+            "ServiceImplB.java",
+            """
+            import ru.tinkoff.kora.common.Component;
+
+            @Component
+            public class ServiceImplB implements MyService {
+                public ServiceImplB() {}
+            }
+            """.trimIndent(),
+        )
+
+        myFixture.configureByText(
+            "MyConsumer.java",
+            """
+            import ru.tinkoff.kora.common.Component;
+            import ru.tinkoff.kora.application.graph.All;
+
+            @Component
+            public class MyConsumer {
+                public MyConsumer(All<MyService> all<caret>Services) {}
+            }
+            """.trimIndent(),
+        )
+
+        val element = myFixture.file.findElementAt(myFixture.caretOffset)!!
+        val targets = KoraProviderResolver.resolve(element)
+
+        assertTrue("Should find at least 2 providers for All<MyService>", targets.size >= 2)
+    }
+
+    fun `test factory method provider found`() {
+        configureAnnotations()
+
+        myFixture.addFileToProject(
+            "MyService.java",
+            """
+            public interface MyService {}
+            """.trimIndent(),
+        )
+
+        myFixture.addFileToProject(
+            "MyModule.java",
+            """
+            import ru.tinkoff.kora.common.Module;
+
+            @Module
+            public interface MyModule {
+                default MyService createMyService() {
+                    return null;
+                }
+            }
+            """.trimIndent(),
+        )
+
+        myFixture.configureByText(
+            "MyConsumer.java",
+            """
+            import ru.tinkoff.kora.common.Component;
+
+            @Component
+            public class MyConsumer {
+                public MyConsumer(MyService my<caret>Service) {}
+            }
+            """.trimIndent(),
+        )
+
+        val element = myFixture.file.findElementAt(myFixture.caretOffset)!!
+        val targets = KoraProviderResolver.resolve(element)
+
+        assertNotEmpty(targets)
+        assertTrue(
+            "Expected to navigate to factory method createMyService",
+            targets.any { it is PsiMethod && it.name == "createMyService" },
+        )
+    }
+
+    fun `test factory method prioritized over Component class`() {
+        configureAnnotations()
+
+        myFixture.addFileToProject(
+            "MyService.java",
+            """
+            public interface MyService {}
+            """.trimIndent(),
+        )
+
+        myFixture.addFileToProject(
+            "MyServiceImpl.java",
+            """
+            import ru.tinkoff.kora.common.Component;
+
+            @Component
+            public class MyServiceImpl implements MyService {
+                public MyServiceImpl() {}
+            }
+            """.trimIndent(),
+        )
+
+        // Simulates generated SubmoduleImpl (annotated with @Generated, not @Module)
+        myFixture.addFileToProject(
+            "MyModuleSubmoduleImpl.java",
+            """
+            import ru.tinkoff.kora.common.annotation.Generated;
+
+            @Generated("ru.tinkoff.kora.kora.app.ksp.KoraSubmoduleProcessor")
+            public interface MyModuleSubmoduleImpl {
+                default MyServiceImpl _component0() {
+                    return new MyServiceImpl();
+                }
+            }
+            """.trimIndent(),
+        )
+
+        myFixture.configureByText(
+            "MyConsumer.java",
+            """
+            import ru.tinkoff.kora.common.Component;
+
+            @Component
+            public class MyConsumer {
+                public MyConsumer(MyService my<caret>Service) {}
+            }
+            """.trimIndent(),
+        )
+
+        val element = myFixture.file.findElementAt(myFixture.caretOffset)!!
+        val targets = KoraProviderResolver.resolve(element)
+
+        assertNotEmpty(targets)
+        assertEquals("Should find only factory method, not @Component class", 1, targets.size)
+        assertTrue(
+            "Expected to navigate to factory method _component0",
+            targets.any { it is PsiMethod && it.name == "_component0" },
+        )
+    }
+
+    fun `test navigate from unannotated module inherited by KoraApp`() {
+        configureAnnotations()
+
+        myFixture.addFileToProject(
+            "MyService.java",
+            """
+            public interface MyService {}
+            """.trimIndent(),
+        )
+
+        myFixture.addFileToProject(
+            "MyServiceImpl.java",
+            """
+            import ru.tinkoff.kora.common.Component;
+
+            @Component
+            public class MyServiceImpl implements MyService {
+                public MyServiceImpl() {}
+            }
+            """.trimIndent(),
+        )
+
+        // @KoraApp extends the unannotated module
+        myFixture.addFileToProject(
+            "MyApp.java",
+            """
+            import ru.tinkoff.kora.common.KoraApp;
+
+            @KoraApp
+            public interface MyApp extends ConfigModule {}
+            """.trimIndent(),
+        )
+
+        // Unannotated module interface with factory methods — caret here
+        myFixture.configureByText(
+            "ConfigModule.java",
+            """
+            public interface ConfigModule {
+                default MyService createService(MyServiceImpl my<caret>Impl) {
+                    return myImpl;
+                }
+            }
+            """.trimIndent(),
+        )
+
+        val element = myFixture.file.findElementAt(myFixture.caretOffset)!!
+        val targets = KoraProviderResolver.resolve(element)
+
+        assertNotEmpty(targets)
+        assertTrue(
+            "Expected to navigate to MyServiceImpl @Component class",
+            targets.any { it is PsiClass && it.name == "MyServiceImpl" },
+        )
+    }
+
+    fun `test non-injection context returns empty`() {
+        configureAnnotations()
+
+        myFixture.configureByText(
+            "PlainClass.java",
+            """
+            public class PlainClass {
+                public PlainClass(String some<caret>Param) {}
+            }
+            """.trimIndent(),
+        )
+
+        val element = myFixture.file.findElementAt(myFixture.caretOffset)!!
+        val targets = KoraProviderResolver.resolve(element)
+
+        assertTrue("Should return empty for non-Kora class", targets.isEmpty())
+    }
+}
