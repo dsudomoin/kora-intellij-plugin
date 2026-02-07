@@ -16,6 +16,8 @@ import org.jetbrains.uast.UClass
 import org.jetbrains.uast.UMethod
 import org.jetbrains.uast.toUElement
 import ru.dsudomoin.koraplugin.KoraAnnotations
+import ru.dsudomoin.koraplugin.index.ProviderKind
+import ru.dsudomoin.koraplugin.index.getProviders
 
 data class KoraProvider(
     val element: PsiElement,
@@ -129,5 +131,55 @@ object ProviderSearch {
         for (superIface in psiClass.interfaces) {
             collectFactoryMethodsRecursive(superIface, result, visited)
         }
+    }
+
+    /**
+     * Index-backed lookup: find providers whose raw provided-type FQN matches [typeFqn].
+     * Reconstructs PSI from index entries, extracts tags at query time.
+     */
+    fun findProvidersByType(project: Project, typeFqn: String): List<KoraProvider>? {
+        val scope = GlobalSearchScope.allScope(project)
+        val entries = getProviders(typeFqn, project, scope) ?: return null
+        if (entries.isEmpty()) return emptyList()
+
+        val facade = JavaPsiFacade.getInstance(project)
+        val result = mutableListOf<KoraProvider>()
+
+        for (entry in entries) {
+            val psiClass = facade.findClass(entry.classFqn, scope) ?: continue
+            when (entry.kind) {
+                ProviderKind.COMPONENT_CLASS -> {
+                    val classType = facade.elementFactory.createType(psiClass)
+                    val uClass = psiClass.toUElement() as? UClass ?: continue
+                    val tagInfo = TagExtractor.extractTags(uClass)
+                    result.add(KoraProvider(psiClass, classType, tagInfo))
+                }
+                ProviderKind.FACTORY_METHOD -> {
+                    val methodName = entry.methodName ?: continue
+                    val method = psiClass.findMethodsByName(methodName, false).firstOrNull() ?: continue
+                    val returnType = method.returnType ?: continue
+                    if (returnType == PsiTypes.voidType()) continue
+                    val uMethod = method.toUElement() as? UMethod ?: continue
+                    val tagInfo = TagExtractor.extractTags(uMethod)
+                    result.add(KoraProvider(method, returnType, tagInfo))
+                }
+            }
+        }
+
+        return result
+    }
+
+    /**
+     * Batch index lookup for multiple type FQNs.
+     */
+    fun findProvidersByTypes(project: Project, typeFqns: Collection<String>): List<KoraProvider>? {
+        val result = mutableListOf<KoraProvider>()
+        val seen = mutableSetOf<String>()
+        for (fqn in typeFqns) {
+            if (seen.add(fqn)) {
+                result.addAll(findProvidersByType(project, fqn) ?: return null)
+            }
+        }
+        return result
     }
 }

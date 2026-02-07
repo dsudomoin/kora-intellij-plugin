@@ -10,6 +10,7 @@ import com.intellij.psi.PsiMethod
 import com.intellij.psi.PsiType
 import com.intellij.psi.PsiTypes
 import com.intellij.psi.search.GlobalSearchScope
+import com.intellij.psi.search.searches.ClassInheritorsSearch
 import org.jetbrains.kotlin.psi.KtClass
 import org.jetbrains.kotlin.psi.KtNamedFunction
 import org.jetbrains.uast.UClass
@@ -19,6 +20,7 @@ import org.jetbrains.uast.getParentOfType
 import org.jetbrains.uast.getUastParentOfType
 import org.jetbrains.uast.toUElement
 import ru.dsudomoin.koraplugin.KoraAnnotations
+import ru.dsudomoin.koraplugin.index.KoraIndexUtil
 
 data class BeanNavigationTargets(
     val providers: List<PsiElement>,
@@ -124,8 +126,8 @@ object KoraBeanNavigator {
     }
 
     private fun resolveParamProviders(project: Project, uMethod: UMethod, paramNames: List<String>): List<ParamProviders> {
-        val allProviders = ProviderSearch.findAllProviders(project)
         val result = mutableListOf<ParamProviders>()
+        val scope = GlobalSearchScope.allScope(project)
 
         for (param in uMethod.uastParameters) {
             val name = param.name
@@ -134,7 +136,10 @@ object KoraBeanNavigator {
             val (resolvedType, _) = InjectionPointDetector.unwrapType(param.type)
             val tagInfo = TagExtractor.extractTags(param)
 
-            val matching = allProviders.filter { provider ->
+            // Use index-backed lookup
+            val providers = findProvidersForType(project, resolvedType, scope)
+
+            val matching = providers.filter { provider ->
                 matchesTypeAssignable(resolvedType, provider.providedType) && matchesProviderTags(tagInfo, provider.tagInfo)
             }.map { it.element }.distinct()
 
@@ -196,19 +201,28 @@ object KoraBeanNavigator {
             else -> return emptyList()
         }
 
-        val allSites = InjectionSiteSearch.findAllInjectionSites(project)
-        return allSites.filter { site ->
+        // Use index-backed lookup: query by provided type FQN + its supertypes
+        val sites = findInjectionSitesForProvidedType(project, providedType)
+        return sites.filter { site ->
             matchesProviderToSite(providedType, tagInfo, site)
         }.map { it.element }.distinct()
     }
 
     private fun resolveForInjectionPoint(element: PsiElement): BeanNavigationTargets? {
         val injectionPoint = InjectionPointDetector.detect(element) ?: return null
+        val project = element.project
 
         val providers = KoraProviderResolver.resolve(element).distinct()
 
-        val allSites = InjectionSiteSearch.findAllInjectionSites(element.project)
-        val usages = allSites.filter { site ->
+        // Use index to find sibling injection sites for the same type (with fallback)
+        val rawFqn = KoraIndexUtil.getRawTypeFqn(injectionPoint.requiredType)
+        val sites = if (rawFqn != null) {
+            InjectionSiteSearch.findInjectionSitesByType(project, rawFqn)
+                ?: InjectionSiteSearch.findAllInjectionSites(project)
+        } else {
+            InjectionSiteSearch.findAllInjectionSites(project)
+        }
+        val usages = sites.filter { site ->
             site.element != element &&
                 matchesTypeForSite(injectionPoint.requiredType, site.requiredType) &&
                 matchesTagsSymmetric(injectionPoint.tagInfo, site.tagInfo)
@@ -298,15 +312,17 @@ object KoraBeanNavigator {
         tagInfo: TagInfo,
         project: com.intellij.openapi.project.Project,
     ): BeanNavigationTargets {
-        // Find usages: injection sites where our type/tags match
-        val allSites = InjectionSiteSearch.findAllInjectionSites(project)
-        val usages = allSites.filter { site ->
+        val scope = GlobalSearchScope.allScope(project)
+
+        // Find usages: injection sites where our type/tags match (index-backed)
+        val sites = findInjectionSitesForProvidedType(project, providedType)
+        val usages = sites.filter { site ->
             matchesProviderToSite(providedType, tagInfo, site)
         }.map { it.element }.distinct()
 
-        // Find other providers of the same type (excluding self)
-        val allProviders = ProviderSearch.findAllProviders(project)
-        val otherProviders = allProviders.filter { provider ->
+        // Find other providers of the same type (excluding self) (index-backed)
+        val providers = findProvidersForType(project, providedType, scope)
+        val otherProviders = providers.filter { provider ->
             provider.element != selfElement &&
                 matchesTypeAssignable(providedType, provider.providedType) &&
                 matchesTagsExact(tagInfo, provider.tagInfo)
@@ -314,6 +330,51 @@ object KoraBeanNavigator {
 
         LOG.info("Provider resolve: otherProviders=${otherProviders.size}, usages=${usages.size}")
         return BeanNavigationTargets(otherProviders, usages)
+    }
+
+    /**
+     * Index-backed: find providers whose raw type FQN matches [requiredType] or any of its subtypes.
+     */
+    private fun findProvidersForType(project: Project, requiredType: PsiType, scope: GlobalSearchScope): List<KoraProvider> {
+        val rawFqn = KoraIndexUtil.getRawTypeFqn(requiredType) ?: return ProviderSearch.findAllProviders(project)
+
+        val typeFqns = mutableListOf(rawFqn)
+        if (requiredType is PsiClassType) {
+            val requiredClass = requiredType.resolve()
+            if (requiredClass != null) {
+                ClassInheritorsSearch.search(requiredClass, scope, true).forEach { inheritor ->
+                    inheritor.qualifiedName?.let { typeFqns.add(it) }
+                }
+            }
+        }
+
+        val result = ProviderSearch.findProvidersByTypes(project, typeFqns)
+        // Fallback to full scan if index not available or returns nothing
+        return result?.ifEmpty { ProviderSearch.findAllProviders(project) }
+            ?: ProviderSearch.findAllProviders(project)
+    }
+
+    /**
+     * Index-backed: find injection sites that require [providedType] or any of its supertypes.
+     */
+    private fun findInjectionSitesForProvidedType(project: Project, providedType: PsiType): List<KoraInjectionSite> {
+        val rawFqn = KoraIndexUtil.getRawTypeFqn(providedType) ?: return InjectionSiteSearch.findAllInjectionSites(project)
+
+        val typeFqns = mutableListOf(rawFqn)
+        if (providedType is PsiClassType) {
+            val providedClass = providedType.resolve()
+            if (providedClass != null) {
+                // Injection sites may require supertypes of the provided type
+                for (superType in providedClass.supers) {
+                    superType.qualifiedName?.let { typeFqns.add(it) }
+                }
+            }
+        }
+
+        val result = InjectionSiteSearch.findInjectionSitesByTypes(project, typeFqns)
+        // Fallback to full scan if index not available or returns nothing
+        return result?.ifEmpty { InjectionSiteSearch.findAllInjectionSites(project) }
+            ?: InjectionSiteSearch.findAllInjectionSites(project)
     }
 
     private fun matchesProviderToSite(

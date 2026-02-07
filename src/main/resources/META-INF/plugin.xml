@@ -16,6 +16,9 @@
     <depends optional="true" config-file="hocon-support.xml">org.jetbrains.plugins.hocon</depends>
 
     <extensions defaultExtensionNs="com.intellij">
+        <fileBasedIndex implementation="ru.dsudomoin.koraplugin.index.KoraProviderIndex"/>
+        <fileBasedIndex implementation="ru.dsudomoin.koraplugin.index.KoraInjectionSiteIndex"/>
+
         <gotoDeclarationHandler
                 implementation="ru.dsudomoin.koraplugin.navigation.KoraGotoDeclarationHandler"/>
         <gotoDeclarationHandler
