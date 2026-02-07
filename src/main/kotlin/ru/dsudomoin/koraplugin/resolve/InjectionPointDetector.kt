@@ -195,7 +195,7 @@ object InjectionPointDetector {
         return psiClass.hasAnnotation(annotationFqn)
     }
 
-    private fun unwrapType(type: PsiType): Pair<PsiType, Boolean> {
+    internal fun unwrapType(type: PsiType): Pair<PsiType, Boolean> {
         if (type is com.intellij.psi.PsiClassType) {
             val resolved = type.resolve()
             if (resolved != null) {

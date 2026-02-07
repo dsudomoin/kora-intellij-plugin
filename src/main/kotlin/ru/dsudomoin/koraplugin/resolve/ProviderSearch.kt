@@ -74,7 +74,6 @@ object ProviderSearch {
             KoraAnnotations.KORA_APP,
             KoraAnnotations.MODULE,
             KoraAnnotations.KORA_SUBMODULE,
-            KoraAnnotations.GENERATED,
         )
 
         val result = mutableListOf<KoraProvider>()
@@ -89,6 +88,19 @@ object ProviderSearch {
             AnnotatedElementsSearch.searchPsiClasses(annotationClass, scope).forEach { psiClass ->
                 LOG.info("  Module class: ${psiClass.qualifiedName} (annotation=$annotationFqn)")
                 collectFactoryMethodsRecursive(psiClass, result, visited)
+            }
+        }
+
+        // @Generated interfaces — treat as module classes (collect factory methods)
+        // Includes submodule implementations, config source modules, etc.
+        // Concrete @Generated classes are handled separately in findGeneratedClassProviders.
+        val generatedAnnotation = facade.findClass(KoraAnnotations.GENERATED, scope)
+        if (generatedAnnotation != null) {
+            AnnotatedElementsSearch.searchPsiClasses(generatedAnnotation, scope).forEach { psiClass ->
+                if (psiClass.isInterface) {
+                    LOG.info("  Generated module interface: ${psiClass.qualifiedName}")
+                    collectFactoryMethodsRecursive(psiClass, result, visited)
+                }
             }
         }
 
