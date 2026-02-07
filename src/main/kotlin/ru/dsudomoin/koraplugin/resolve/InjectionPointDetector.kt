@@ -91,11 +91,8 @@ object InjectionPointDetector {
 
         val psiClass = uClass.javaPsi
 
-        // Check super interfaces (for extends chains going UP)
-        for (superIface in psiClass.supers) {
-            val superUClass = superIface.toUElement() as? UClass ?: continue
-            if (hasAnyModuleAnnotation(superUClass)) return true
-        }
+        // Check all super interfaces transitively (for extends chains going UP)
+        if (hasAnyModuleAnnotationInSupers(psiClass, mutableSetOf())) return true
 
         // Check inheritors via cached set (going DOWN — e.g., @KoraApp class inheriting this interface)
         val moduleClassFqns = getModuleClassFqns(psiClass.project)
@@ -148,10 +145,11 @@ object InjectionPointDetector {
     }
 
     private fun addClassAndSupersFqns(psiClass: PsiClass, result: MutableSet<String>) {
-        psiClass.qualifiedName?.let { result.add(it) }
-        // Add all super interfaces so unannotated parent interfaces are also recognized
+        val fqn = psiClass.qualifiedName ?: return
+        if (!result.add(fqn)) return // already visited
+        // Recursively add all super interfaces so unannotated parent interfaces are also recognized
         for (superIface in psiClass.interfaces) {
-            superIface.qualifiedName?.let { result.add(it) }
+            addClassAndSupersFqns(superIface, result)
         }
     }
 
@@ -175,6 +173,17 @@ object InjectionPointDetector {
 
     private fun hasAnyModuleAnnotation(uClass: UClass): Boolean {
         return MODULE_ANNOTATIONS.any { hasAnnotation(uClass, it) }
+    }
+
+    private fun hasAnyModuleAnnotationInSupers(psiClass: PsiClass, visited: MutableSet<String>): Boolean {
+        for (superIface in psiClass.supers) {
+            val fqn = superIface.qualifiedName ?: continue
+            if (!visited.add(fqn)) continue
+            val superUClass = superIface.toUElement() as? UClass ?: continue
+            if (hasAnyModuleAnnotation(superUClass)) return true
+            if (hasAnyModuleAnnotationInSupers(superIface, visited)) return true
+        }
+        return false
     }
 
     private fun hasAnnotation(uClass: UClass, annotationFqn: String): Boolean {

@@ -1,10 +1,16 @@
 package ru.dsudomoin.koraplugin
 
+import com.intellij.psi.PsiIdentifier
+import com.intellij.psi.PsiParameter
+import com.intellij.psi.util.PsiTreeUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
+import ru.dsudomoin.koraplugin.navigation.KoraLineMarkerProvider
 
 class KoraLineMarkerProviderTest : BasePlatformTestCase() {
 
     override fun getTestDataPath(): String = "src/test/testData"
+
+    private val provider = KoraLineMarkerProvider()
 
     private fun configureAnnotations() {
         myFixture.configureByFiles(
@@ -15,6 +21,11 @@ class KoraLineMarkerProviderTest : BasePlatformTestCase() {
             "ru/tinkoff/kora/common/Tag.java",
             "ru/tinkoff/kora/application/graph/All.java",
         )
+    }
+
+    private fun findParameterIdentifiers(): List<PsiIdentifier> {
+        return PsiTreeUtil.findChildrenOfType(myFixture.file, PsiIdentifier::class.java)
+            .filter { it.parent is PsiParameter }
     }
 
     fun `test gutter icon on Component constructor parameter`() {
@@ -51,10 +62,12 @@ class KoraLineMarkerProviderTest : BasePlatformTestCase() {
             """.trimIndent(),
         )
 
-        val gutters = myFixture.findAllGutters()
-        val koraGutters = gutters.filter { it.tooltipText == "Navigate to Kora DI provider" }
+        val paramIdents = findParameterIdentifiers()
+        assertFalse("Should find parameter identifiers", paramIdents.isEmpty())
 
-        assertFalse("Expected at least one Kora gutter icon", koraGutters.isEmpty())
+        val markers = paramIdents.mapNotNull { provider.getLineMarkerInfo(it) }
+        assertFalse("Expected at least one Kora gutter icon", markers.isEmpty())
+        assertEquals("Navigate to Kora DI provider", markers.first().lineMarkerTooltip)
     }
 
     fun `test gutter icon on Module factory method parameter`() {
@@ -93,10 +106,12 @@ class KoraLineMarkerProviderTest : BasePlatformTestCase() {
             """.trimIndent(),
         )
 
-        val gutters = myFixture.findAllGutters()
-        val koraGutters = gutters.filter { it.tooltipText == "Navigate to Kora DI provider" }
+        val paramIdents = findParameterIdentifiers()
+        assertFalse("Should find parameter identifiers", paramIdents.isEmpty())
 
-        assertFalse("Expected at least one Kora gutter icon on Module parameter", koraGutters.isEmpty())
+        val markers = paramIdents.mapNotNull { provider.getLineMarkerInfo(it) }
+        assertFalse("Expected at least one Kora gutter icon on Module parameter", markers.isEmpty())
+        assertEquals("Navigate to Kora DI provider", markers.first().lineMarkerTooltip)
     }
 
     fun `test no gutter icon on plain class parameter`() {
@@ -111,9 +126,10 @@ class KoraLineMarkerProviderTest : BasePlatformTestCase() {
             """.trimIndent(),
         )
 
-        val gutters = myFixture.findAllGutters()
-        val koraGutters = gutters.filter { it.tooltipText == "Navigate to Kora DI provider" }
+        val paramIdents = findParameterIdentifiers()
+        assertFalse("Should find parameter identifiers", paramIdents.isEmpty())
 
-        assertTrue("Should not have Kora gutter icons on plain class", koraGutters.isEmpty())
+        val markers = paramIdents.mapNotNull { provider.getLineMarkerInfo(it) }
+        assertTrue("Should not have Kora gutter icons on plain class", markers.isEmpty())
     }
 }
