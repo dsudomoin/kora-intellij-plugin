@@ -4,6 +4,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.psi.PsiClass
 import com.intellij.psi.PsiClassType
 import com.intellij.psi.PsiElement
+import com.intellij.psi.PsiField
 import com.intellij.psi.PsiMethod
 import com.intellij.psi.PsiType
 import com.intellij.psi.util.PsiUtil
@@ -36,21 +37,40 @@ object ConfigPathResolver {
 
     /**
      * Resolves a dot-separated path within a @ConfigSource class hierarchy.
+     * Supports both interface methods and data class properties (fields).
      * Handles Map<K, V> return types by skipping one segment (the map key)
      * and continuing resolution with the value type V.
      */
-    private fun resolvePathInClass(psiClass: PsiClass, path: String): PsiMethod? {
+    private fun resolvePathInClass(psiClass: PsiClass, path: String): PsiElement? {
         val segments = path.split(".")
         var currentClass = psiClass
-        var lastMethod: PsiMethod? = null
+        var lastElement: PsiElement? = null
         var i = 0
 
         while (i < segments.size) {
-            val method = currentClass.findMethodsByName(segments[i], true).firstOrNull() ?: return lastMethod
-            lastMethod = method
+            val segment = segments[i]
+            val altSegment = if ('-' in segment) kebabToCamel(segment) else camelToKebab(segment)
+
+            // Try method first (interfaces, records), then field (data classes)
+            val method = currentClass.findMethodsByName(segment, true).firstOrNull()
+                ?: currentClass.findMethodsByName(altSegment, true).firstOrNull()
+            val returnType: PsiType?
+            if (method != null) {
+                lastElement = method
+                returnType = method.returnType
+            } else {
+                val field = currentClass.findFieldByName(segment, false)
+                    ?: currentClass.findFieldByName(altSegment, false)
+                if (field != null) {
+                    lastElement = field
+                    returnType = field.type
+                } else {
+                    return lastElement
+                }
+            }
             i++
 
-            val returnType = method.returnType ?: return lastMethod
+            if (returnType == null) return lastElement
 
             // Check if return type is Map<K, V> — skip one segment (map key), continue with V
             val mapValueClass = resolveMapValueClass(returnType)
@@ -60,14 +80,21 @@ object ConfigPathResolver {
                 continue
             }
 
+            // Check if return type is List<T>/Set<T>/Collection<T> — unwrap to element type T
+            val collectionElementClass = resolveCollectionElementClass(returnType)
+            if (collectionElementClass != null) {
+                currentClass = collectionElementClass
+                continue
+            }
+
             val returnClass = PsiUtil.resolveClassInClassTypeOnly(returnType)
             if (returnClass != null) {
                 currentClass = returnClass
             } else {
-                return lastMethod
+                return lastElement
             }
         }
-        return lastMethod
+        return lastElement
     }
 
     /**
@@ -76,8 +103,17 @@ object ConfigPathResolver {
      * Map<K, V> methods produce a "*" wildcard segment in the path.
      */
     fun resolveMethodToConfigPath(method: PsiMethod): String? {
-        val segments = mutableListOf(method.name)
-        var currentClass = method.containingClass ?: return null
+        return resolveMemberToConfigPath(method.name, method.containingClass ?: return null)
+    }
+
+    /**
+     * Code → Config: resolves a member (method or property) by name within a @ConfigSource class
+     * to its full config path (e.g. "hub.spawn.location").
+     * Map<K, V> members produce a "*" wildcard segment in the path.
+     */
+    fun resolveMemberToConfigPath(memberName: String, containingClass: PsiClass): String? {
+        val segments = mutableListOf(memberName)
+        var currentClass = containingClass
 
         // Walk up through enclosing classes until we find one with @ConfigSource
         while (true) {
@@ -88,29 +124,29 @@ object ConfigPathResolver {
                 return segments.reversed().joinToString(".")
             }
 
-            // Check if currentClass is a return type of a method in a parent @ConfigSource class
+            // Check if currentClass is a return type of a member in a parent @ConfigSource class
             val enclosingClass = currentClass.containingClass
             if (enclosingClass != null) {
-                // Nested interface: find the method in enclosing class that returns this type
-                val parentMethod = findMethodReturningType(enclosingClass, currentClass)
-                if (parentMethod != null) {
-                    if (resolveMapValueClass(parentMethod.returnType) != null) {
+                // Nested class: find the member in enclosing class that returns this type
+                val parent = findMemberReturningType(enclosingClass, currentClass)
+                if (parent != null) {
+                    if (parent.second != null && resolveMapValueClass(parent.second) != null) {
                         segments.add("*")
                     }
-                    segments.add(parentMethod.name)
+                    segments.add(parent.first)
                 }
                 currentClass = enclosingClass
             } else {
-                // Non-nested: scan all @ConfigSource classes to find one whose method returns this type
-                val project = method.project
+                // Non-nested: scan all @ConfigSource classes to find one whose member returns this type
+                val project = containingClass.project
                 val entries = ConfigSourceSearch.findAllConfigSources(project)
                 for (entry in entries) {
-                    val parentMethod = findMethodReturningType(entry.psiClass, currentClass)
-                    if (parentMethod != null) {
-                        if (resolveMapValueClass(parentMethod.returnType) != null) {
+                    val parent = findMemberReturningType(entry.psiClass, currentClass)
+                    if (parent != null) {
+                        if (parent.second != null && resolveMapValueClass(parent.second) != null) {
                             segments.add("*")
                         }
-                        segments.add(parentMethod.name)
+                        segments.add(parent.first)
                         segments.add(entry.path)
                         return segments.reversed().joinToString(".")
                     }
@@ -120,14 +156,26 @@ object ConfigPathResolver {
         }
     }
 
-    private fun findMethodReturningType(inClass: PsiClass, targetClass: PsiClass): PsiMethod? {
-        return inClass.methods.find { m ->
-            val returnType = m.returnType ?: return@find false
+    /** Returns (memberName, memberType) of the method or field in [inClass] that returns [targetClass]. */
+    private fun findMemberReturningType(inClass: PsiClass, targetClass: PsiClass): Pair<String, PsiType?>? {
+        for (m in inClass.methods) {
+            val returnType = m.returnType ?: continue
             val returnClass = PsiUtil.resolveClassInClassTypeOnly(returnType)
-            if (returnClass == targetClass) return@find true
-            // Also check Map<K, V> where V == targetClass
-            resolveMapValueClass(returnType) == targetClass
+            if (returnClass == targetClass
+                || resolveMapValueClass(returnType) == targetClass
+                || resolveCollectionElementClass(returnType) == targetClass
+            ) {
+                return m.name to returnType
+            }
         }
+        for (f in inClass.fields) {
+            val fieldType = f.type
+            val fieldClass = PsiUtil.resolveClassInClassTypeOnly(fieldType)
+            if (fieldClass == targetClass || resolveCollectionElementClass(fieldType) == targetClass) {
+                return f.name to fieldType
+            }
+        }
+        return null
     }
 
     /**
@@ -142,10 +190,42 @@ object ConfigPathResolver {
         return PsiUtil.resolveClassInClassTypeOnly(typeArgs[1])
     }
 
+    private val COLLECTION_FQNS = setOf(
+        "java.util.List", "java.util.Set", "java.util.Collection", "java.lang.Iterable",
+    )
+
+    /**
+     * If the type is List<T>, Set<T>, Collection<T> or Iterable<T>, returns the PsiClass of T. Otherwise null.
+     */
+    private fun resolveCollectionElementClass(type: PsiType?): PsiClass? {
+        if (type !is PsiClassType) return null
+        val resolved = type.resolve() ?: return null
+        if (resolved.qualifiedName !in COLLECTION_FQNS) return null
+        val typeArgs = type.parameters
+        if (typeArgs.isEmpty()) return null
+        return PsiUtil.resolveClassInClassTypeOnly(typeArgs[0])
+    }
+
     private fun extractConfigSourcePath(uClass: UClass): String? {
         val annotation = uClass.uAnnotations.find {
             it.qualifiedName == KoraAnnotations.CONFIG_SOURCE
         } ?: return null
         return annotation.findAttributeValue("value")?.evaluate() as? String
+    }
+
+    /** camelCase → kebab-case: "hubItems" → "hub-items" */
+    fun camelToKebab(name: String): String {
+        if (!name.any { it.isUpperCase() }) return name
+        return name.replace(Regex("([a-z0-9])([A-Z])")) {
+            "${it.groupValues[1]}-${it.groupValues[2].lowercase()}"
+        }
+    }
+
+    /** kebab-case → camelCase: "hub-items" → "hubItems" */
+    fun kebabToCamel(name: String): String {
+        if ('-' !in name) return name
+        return name.replace(Regex("-([a-z])")) {
+            it.groupValues[1].uppercase()
+        }
     }
 }

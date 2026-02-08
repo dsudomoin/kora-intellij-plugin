@@ -53,19 +53,17 @@ object ProviderSearch {
 
     private fun findComponentProviders(project: Project, scope: GlobalSearchScope): List<KoraProvider> {
         val facade = JavaPsiFacade.getInstance(project)
-        val componentAnnotation = facade.findClass(KoraAnnotations.COMPONENT, scope)
-        if (componentAnnotation == null) {
-            LOG.info("@Component annotation class not found in scope")
-            return emptyList()
-        }
-
         val result = mutableListOf<KoraProvider>()
-        AnnotatedElementsSearch.searchPsiClasses(componentAnnotation, scope).forEach { psiClass ->
-            val classType = facade.elementFactory.createType(psiClass)
-            val uClass = psiClass.toUElement() as? UClass ?: return@forEach
-            val tagInfo = TagExtractor.extractTags(uClass)
-            LOG.info("  @Component: ${psiClass.qualifiedName} (type=${classType.canonicalText}, tags=$tagInfo)")
-            result.add(KoraProvider(psiClass, classType, tagInfo))
+
+        for (annotationFqn in KoraAnnotations.COMPONENT_LIKE) {
+            val annotationClass = facade.findClass(annotationFqn, scope) ?: continue
+            AnnotatedElementsSearch.searchPsiClasses(annotationClass, scope).forEach { psiClass ->
+                val classType = facade.elementFactory.createType(psiClass)
+                val uClass = psiClass.toUElement() as? UClass ?: return@forEach
+                val tagInfo = TagExtractor.extractTags(uClass)
+                LOG.info("  Component-like: ${psiClass.qualifiedName} (type=${classType.canonicalText}, tags=$tagInfo)")
+                result.add(KoraProvider(psiClass, classType, tagInfo))
+            }
         }
         return result
     }
@@ -135,12 +133,12 @@ object ProviderSearch {
 
     /**
      * Index-backed lookup: find providers whose raw provided-type FQN matches [typeFqn].
-     * Reconstructs PSI from index entries, extracts tags at query time.
+     * Reconstructs PSI from index entries, then supplements with factory methods from
+     * unannotated module interfaces (not covered by the index).
      */
     fun findProvidersByType(project: Project, typeFqn: String): List<KoraProvider>? {
         val scope = GlobalSearchScope.allScope(project)
         val entries = getProviders(typeFqn, project, scope) ?: return null
-        if (entries.isEmpty()) return emptyList()
 
         val facade = JavaPsiFacade.getInstance(project)
         val result = mutableListOf<KoraProvider>()
@@ -166,6 +164,9 @@ object ProviderSearch {
             }
         }
 
+        // Supplement: factory methods in unannotated module interfaces (not indexed)
+        supplementProvidersFromUnannotatedModules(project, typeFqn, result, facade, scope)
+
         return result
     }
 
@@ -181,5 +182,38 @@ object ProviderSearch {
             }
         }
         return result
+    }
+
+    /**
+     * For module classes that are NOT directly annotated (@Module/@KoraApp/etc.) but participate
+     * in the container via extends/implements chain, the FileBasedIndex misses their factory methods.
+     * Supplement index results with a targeted PSI lookup for these classes.
+     */
+    private fun supplementProvidersFromUnannotatedModules(
+        project: Project,
+        typeFqn: String,
+        result: MutableList<KoraProvider>,
+        facade: JavaPsiFacade,
+        scope: GlobalSearchScope,
+    ) {
+        val moduleClassFqns = KoraModuleRegistry.getModuleClassFqns(project)
+        val existingElements = result.mapTo(HashSet()) { it.element }
+
+        for (moduleFqn in moduleClassFqns) {
+            val psiClass = facade.findClass(moduleFqn, scope) ?: continue
+            if (KoraModuleRegistry.isDirectlyAnnotatedModule(psiClass)) continue
+
+            for (method in psiClass.methods) {
+                if (method in existingElements) continue
+                val returnType = method.returnType ?: continue
+                if (returnType == PsiTypes.voidType()) continue
+                val returnFqn = com.intellij.psi.util.TypeConversionUtil.erasure(returnType).canonicalText
+                if (returnFqn == typeFqn) {
+                    val uMethod = method.toUElement() as? UMethod ?: continue
+                    val tagInfo = TagExtractor.extractTags(uMethod)
+                    result.add(KoraProvider(method, returnType, tagInfo))
+                }
+            }
+        }
     }
 }

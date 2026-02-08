@@ -2,6 +2,11 @@ package ru.dsudomoin.koraplugin
 
 object KoraAnnotations {
     const val COMPONENT = "ru.tinkoff.kora.common.Component"
+    const val REPOSITORY = "ru.tinkoff.kora.database.common.annotation.Repository"
+
+    /** Annotations that mark a class as a DI-provided component. */
+    val COMPONENT_LIKE = listOf(COMPONENT, REPOSITORY)
+
     const val KORA_APP = "ru.tinkoff.kora.common.KoraApp"
     const val MODULE = "ru.tinkoff.kora.common.Module"
     const val KORA_SUBMODULE = "ru.tinkoff.kora.common.KoraSubmodule"
