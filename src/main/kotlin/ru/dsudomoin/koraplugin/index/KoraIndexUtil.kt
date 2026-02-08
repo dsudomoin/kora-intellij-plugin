@@ -33,7 +33,8 @@ object KoraIndexUtil {
     // ========== Indexer-safe methods (file-local PSI only) ==========
 
     fun isComponentClass(psiClass: PsiClass): Boolean {
-        return hasAnnotationInFile(psiClass, "Component", KoraAnnotations.COMPONENT)
+        return hasAnnotationInFile(psiClass, "Component", KoraAnnotations.COMPONENT) ||
+            hasAnnotationInFile(psiClass, "Repository", KoraAnnotations.REPOSITORY)
     }
 
     fun isKoraModuleClass(psiClass: PsiClass): Boolean {
@@ -110,7 +111,8 @@ object KoraIndexUtil {
     }
 
     fun isComponentKtClass(cls: KtClassOrObject): Boolean {
-        return hasKtAnnotation(cls, "Component", KoraAnnotations.COMPONENT)
+        return hasKtAnnotation(cls, "Component", KoraAnnotations.COMPONENT) ||
+            hasKtAnnotation(cls, "Repository", KoraAnnotations.REPOSITORY)
     }
 
     fun isKoraModuleKtClass(cls: KtClassOrObject): Boolean {

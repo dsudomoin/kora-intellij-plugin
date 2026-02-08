@@ -4,7 +4,6 @@ import com.intellij.codeInsight.daemon.GutterIconNavigationHandler
 import com.intellij.codeInsight.daemon.LineMarkerInfo
 import com.intellij.codeInsight.daemon.LineMarkerProvider
 import com.intellij.codeInsight.navigation.PsiTargetNavigator
-import com.intellij.codeInsight.navigation.openFileWithPsiElement
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.editor.markup.GutterIconRenderer
 import com.intellij.openapi.application.ReadAction
@@ -60,20 +59,20 @@ class KoraLineMarkerProvider : LineMarkerProvider {
     private data class FactoryMethodInfo(val classFqn: String, val methodName: String)
 
     /**
-     * If element is the name identifier of a @Component class, returns the class FQN.
+     * If element is the name identifier of a @Component / @Repository class, returns the class FQN.
      */
     private fun getComponentClassFqn(element: PsiElement): String? {
         val parent = element.parent
         when (parent) {
             is com.intellij.psi.PsiClass -> {
                 if (element != parent.nameIdentifier) return null
-                if (!parent.hasAnnotation(KoraAnnotations.COMPONENT)) return null
+                if (KoraAnnotations.COMPONENT_LIKE.none { parent.hasAnnotation(it) }) return null
                 return parent.qualifiedName
             }
             is KtClass -> {
                 if (element != parent.nameIdentifier) return null
                 val uClass = parent.toUElement() as? UClass ?: return null
-                if (!uClass.javaPsi.hasAnnotation(KoraAnnotations.COMPONENT)) return null
+                if (KoraAnnotations.COMPONENT_LIKE.none { uClass.javaPsi.hasAnnotation(it) }) return null
                 return uClass.qualifiedName
             }
             else -> return null
@@ -182,8 +181,8 @@ class KoraLineMarkerProvider : LineMarkerProvider {
         val document = element.containingFile?.viewProvider?.document ?: return null
         val myLine = document.getLineNumber(element.textOffset)
 
-        // If @Component class name is on the same line → skip (component class marker handles it)
-        if (uMethod.isConstructor && uClass.javaPsi.hasAnnotation(KoraAnnotations.COMPONENT)) {
+        // If @Component/@Repository class name is on the same line → skip (component class marker handles it)
+        if (uMethod.isConstructor && KoraAnnotations.COMPONENT_LIKE.any { uClass.javaPsi.hasAnnotation(it) }) {
             val classNameElement = getClassNameIdentifier(uClass)
             if (classNameElement != null && document.getLineNumber(classNameElement.textOffset) == myLine) {
                 return null // component class marker on this line will handle params
@@ -287,7 +286,7 @@ class KoraLineMarkerProvider : LineMarkerProvider {
                 project,
             )
 
-            navigateToElements(e, project, usages, "Choose Kora DI Usage")
+            navigateToElements(e, project, usages, "Choose Kora DI Usage", "No injection sites found")
         }
     }
 
@@ -334,7 +333,7 @@ class KoraLineMarkerProvider : LineMarkerProvider {
                 true,
                 project,
             )
-            navigateToElements(e, project, usages, "Choose Injection Site")
+            navigateToElements(e, project, usages, "Choose Injection Site", "No injection sites found")
         }
 
         private fun navigateToProvidersLazy(e: MouseEvent, project: com.intellij.openapi.project.Project) {
@@ -356,13 +355,14 @@ class KoraLineMarkerProvider : LineMarkerProvider {
 
             if (paramProviders.isEmpty()) {
                 JBPopupFactory.getInstance()
-                    .createMessage("No dependency providers found")
-                    .show(RelativePoint(e))
+                    .createHtmlTextBalloonBuilder("No dependency providers found", com.intellij.openapi.ui.MessageType.WARNING, null)
+                    .createBalloon()
+                    .show(RelativePoint(e), com.intellij.openapi.ui.popup.Balloon.Position.above)
                 return
             }
             if (paramProviders.size == 1) {
                 val single = paramProviders.single()
-                navigateToElements(e, project, single.providers, "Choose Dependency Provider")
+                navigateToElements(e, project, single.providers, "Choose Dependency Provider", "No providers found")
                 return
             }
 
@@ -383,14 +383,14 @@ class KoraLineMarkerProvider : LineMarkerProvider {
                     }
                 })
                 .setItemChosenCallback { pp ->
-                    navigateToElements(e, project, pp.providers, "Choose Dependency Provider")
+                    navigateToElements(e, project, pp.providers, "Choose Dependency Provider", "No providers found")
                 }
                 .createPopup()
                 .show(RelativePoint(e))
         }
 
         companion object {
-            const val LABEL_INJECTION_SITES = "Where this bean is injected"
+            const val LABEL_INJECTION_SITES = "Where this component is injected"
             const val LABEL_DEPENDENCY_PROVIDERS = "Where dependencies are created"
         }
     }
@@ -399,7 +399,7 @@ class KoraLineMarkerProvider : LineMarkerProvider {
     private class SingleParamNavigationHandler : GutterIconNavigationHandler<PsiElement> {
         override fun navigate(e: MouseEvent, elt: PsiElement) {
             val targets = KoraProviderResolver.resolve(elt).distinct()
-            navigateToElements(e, elt.project, targets, "Choose Kora DI Provider")
+            navigateToElements(e, elt.project, targets, "Choose Kora DI Provider", "No providers found")
         }
     }
 
@@ -433,7 +433,7 @@ class KoraLineMarkerProvider : LineMarkerProvider {
                         else -> psi
                     }
                     val targets = KoraProviderResolver.resolve(nameElement).distinct()
-                    navigateToElements(e, elt.project, targets, "Choose Kora DI Provider")
+                    navigateToElements(e, elt.project, targets, "Choose Kora DI Provider", "No providers found")
                 }
                 .createPopup()
                 .show(RelativePoint(e))
@@ -441,19 +441,29 @@ class KoraLineMarkerProvider : LineMarkerProvider {
     }
 }
 
+private fun navigateToElement(element: PsiElement) {
+    val file = element.containingFile?.virtualFile ?: return
+    val descriptor = com.intellij.openapi.fileEditor.OpenFileDescriptor(
+        element.project, file, element.textOffset
+    )
+    descriptor.navigate(true)
+}
+
 private fun navigateToElements(
     e: MouseEvent,
     project: com.intellij.openapi.project.Project,
     elements: List<PsiElement>,
     title: String,
+    emptyMessage: String = "Nothing found",
 ) {
     when (elements.size) {
         0 -> {
-            com.intellij.openapi.ui.popup.JBPopupFactory.getInstance()
-                .createMessage("Nothing found")
-                .show(RelativePoint(e))
+            JBPopupFactory.getInstance()
+                .createHtmlTextBalloonBuilder(emptyMessage, com.intellij.openapi.ui.MessageType.WARNING, null)
+                .createBalloon()
+                .show(RelativePoint(e), com.intellij.openapi.ui.popup.Balloon.Position.above)
         }
-        1 -> openFileWithPsiElement(elements.single(), true, true)
+        1 -> navigateToElement(elements.single())
         else -> PsiTargetNavigator(elements).navigate(e, title, project)
     }
 }

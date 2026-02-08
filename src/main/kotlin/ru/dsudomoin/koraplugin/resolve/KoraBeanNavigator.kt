@@ -168,7 +168,7 @@ object KoraBeanNavigator {
 
         when (declaration) {
             is PsiClass -> {
-                if (!declaration.hasAnnotation(KoraAnnotations.COMPONENT)) return emptyList()
+                if (KoraAnnotations.COMPONENT_LIKE.none { declaration.hasAnnotation(it) }) return emptyList()
                 val uClass = declaration.toUElement() as? UClass ?: return emptyList()
                 val facade = com.intellij.psi.JavaPsiFacade.getInstance(project)
                 providedType = facade.elementFactory.createType(declaration)
@@ -177,7 +177,7 @@ object KoraBeanNavigator {
             is KtClass -> {
                 val uClass = declaration.toUElement() as? UClass ?: return emptyList()
                 val psiClass = uClass.javaPsi
-                if (!psiClass.hasAnnotation(KoraAnnotations.COMPONENT)) return emptyList()
+                if (KoraAnnotations.COMPONENT_LIKE.none { psiClass.hasAnnotation(it) }) return emptyList()
                 val facade = com.intellij.psi.JavaPsiFacade.getInstance(project)
                 providedType = facade.elementFactory.createType(psiClass)
                 tagInfo = TagExtractor.extractTags(uClass)
@@ -263,7 +263,7 @@ object KoraBeanNavigator {
             }
             else -> return null
         }
-        if (!psiClass.hasAnnotation(KoraAnnotations.COMPONENT)) return null
+        if (KoraAnnotations.COMPONENT_LIKE.none { psiClass.hasAnnotation(it) }) return null
 
         val project = element.project
         val facade = com.intellij.psi.JavaPsiFacade.getInstance(project)
@@ -295,7 +295,7 @@ object KoraBeanNavigator {
 
         val uClass = uMethod.getParentOfType<UClass>() ?: return null
         if (!InjectionPointDetector.isKoraInjectionContext(uMethod, uClass) &&
-            !uClass.javaPsi.hasAnnotation(KoraAnnotations.COMPONENT)
+            KoraAnnotations.COMPONENT_LIKE.none { uClass.javaPsi.hasAnnotation(it) }
         ) {
             return null
         }

@@ -59,14 +59,16 @@ object InjectionSiteSearch {
 
     private fun findComponentConstructorSites(project: Project, allScope: GlobalSearchScope, projectScope: GlobalSearchScope): List<KoraInjectionSite> {
         val facade = JavaPsiFacade.getInstance(project)
-        val componentAnnotation = facade.findClass(KoraAnnotations.COMPONENT, allScope) ?: return emptyList()
-
         val result = mutableListOf<KoraInjectionSite>()
-        AnnotatedElementsSearch.searchPsiClasses(componentAnnotation, projectScope).forEach { psiClass ->
-            val uClass = psiClass.toUElement() as? UClass ?: return@forEach
-            for (method in uClass.methods) {
-                if (!method.isConstructor) continue
-                collectParameterSites(method, result)
+
+        for (annotationFqn in KoraAnnotations.COMPONENT_LIKE) {
+            val annotationClass = facade.findClass(annotationFqn, allScope) ?: continue
+            AnnotatedElementsSearch.searchPsiClasses(annotationClass, projectScope).forEach { psiClass ->
+                val uClass = psiClass.toUElement() as? UClass ?: return@forEach
+                for (method in uClass.methods) {
+                    if (!method.isConstructor) continue
+                    collectParameterSites(method, result)
+                }
             }
         }
         return result
@@ -140,12 +142,12 @@ object InjectionSiteSearch {
 
     /**
      * Index-backed lookup: find injection sites whose raw required-type FQN matches [typeFqn].
-     * Reconstructs PSI from index entries, extracts tags at query time.
+     * Reconstructs PSI from index entries, then supplements with parameters from
+     * unannotated module interfaces (not covered by the index).
      */
     fun findInjectionSitesByType(project: Project, typeFqn: String): List<KoraInjectionSite>? {
         val scope = GlobalSearchScope.projectScope(project)
         val entries = KoraInjectionSiteIndex.getSites(typeFqn, project, scope) ?: return null
-        if (entries.isEmpty()) return emptyList()
 
         val allScope = GlobalSearchScope.allScope(project)
         val facade = JavaPsiFacade.getInstance(project)
@@ -172,6 +174,9 @@ object InjectionSiteSearch {
             result.add(KoraInjectionSite(nameElement, resolvedType, tagInfo, isAllOf))
         }
 
+        // Supplement: injection sites in unannotated module interfaces (not indexed)
+        supplementSitesFromUnannotatedModules(project, typeFqn, result, facade, allScope)
+
         return result
     }
 
@@ -187,5 +192,48 @@ object InjectionSiteSearch {
             }
         }
         return result
+    }
+
+    /**
+     * For module classes that are NOT directly annotated but participate in the container,
+     * the FileBasedIndex misses their method parameters.
+     * Supplement index results with a targeted PSI lookup for these classes.
+     */
+    private fun supplementSitesFromUnannotatedModules(
+        project: Project,
+        typeFqn: String,
+        result: MutableList<KoraInjectionSite>,
+        facade: JavaPsiFacade,
+        scope: GlobalSearchScope,
+    ) {
+        val moduleClassFqns = KoraModuleRegistry.getModuleClassFqns(project)
+        val existingElements = result.mapTo(HashSet()) { it.element }
+
+        for (moduleFqn in moduleClassFqns) {
+            val psiClass = facade.findClass(moduleFqn, scope) ?: continue
+            if (KoraModuleRegistry.isDirectlyAnnotatedModule(psiClass)) continue
+
+            for (method in psiClass.methods) {
+                val returnType = method.returnType ?: continue
+                if (returnType == PsiTypes.voidType()) continue
+
+                val uMethod = method.toUElement() as? UMethod ?: continue
+                for (param in uMethod.uastParameters) {
+                    val paramPsi = param.sourcePsi ?: continue
+                    val nameElement = when (paramPsi) {
+                        is com.intellij.psi.PsiParameter -> paramPsi.nameIdentifier ?: paramPsi
+                        else -> paramPsi
+                    }
+                    if (nameElement in existingElements) continue
+
+                    val (resolvedType, isAllOf) = InjectionPointDetector.unwrapType(param.type)
+                    val paramTypeFqn = com.intellij.psi.util.TypeConversionUtil.erasure(resolvedType).canonicalText
+                    if (paramTypeFqn == typeFqn) {
+                        val tagInfo = TagExtractor.extractTags(param)
+                        result.add(KoraInjectionSite(nameElement, resolvedType, tagInfo, isAllOf))
+                    }
+                }
+            }
+        }
     }
 }

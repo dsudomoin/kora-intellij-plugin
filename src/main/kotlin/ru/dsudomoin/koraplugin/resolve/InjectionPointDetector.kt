@@ -4,10 +4,6 @@ import com.intellij.openapi.diagnostic.Logger
 import com.intellij.psi.PsiClass
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiType
-import com.intellij.psi.search.GlobalSearchScope
-import com.intellij.psi.util.CachedValueProvider
-import com.intellij.psi.util.CachedValuesManager
-import com.intellij.psi.util.PsiModificationTracker
 import org.jetbrains.uast.*
 import ru.dsudomoin.koraplugin.KoraAnnotations
 
@@ -63,9 +59,9 @@ object InjectionPointDetector {
     }
 
     internal fun isKoraInjectionContext(uMethod: UMethod, uClass: UClass): Boolean {
-        // Case 1: Constructor of a @Component class
+        // Case 1: Constructor of a @Component / @Repository class
         if (uMethod.isConstructor) {
-            if (hasAnnotation(uClass, KoraAnnotations.COMPONENT)) {
+            if (KoraAnnotations.COMPONENT_LIKE.any { hasAnnotation(uClass, it) }) {
                 return true
             }
         }
@@ -94,63 +90,12 @@ object InjectionPointDetector {
         // Check all super interfaces transitively (for extends chains going UP)
         if (hasAnyModuleAnnotationInSupers(psiClass, mutableSetOf())) return true
 
-        // Check inheritors via cached set (going DOWN — e.g., @KoraApp class inheriting this interface)
-        val moduleClassFqns = getModuleClassFqns(psiClass.project)
+        // Check via cached module registry (going DOWN — e.g., @KoraApp class inheriting this interface)
+        val moduleClassFqns = KoraModuleRegistry.getModuleClassFqns(psiClass.project)
         val fqn = psiClass.qualifiedName
         if (fqn != null && fqn in moduleClassFqns) return true
 
         return false
-    }
-
-    /**
-     * Cached set of all FQNs of classes that are Kora module classes
-     * (annotated with @KoraApp/@Module/@KoraSubmodule or have annotated inheritors).
-     * Invalidated on any PSI change.
-     */
-    private fun getModuleClassFqns(project: com.intellij.openapi.project.Project): Set<String> {
-        return CachedValuesManager.getManager(project).getCachedValue(project) {
-            val fqns = collectAllModuleClassFqns(project)
-            CachedValueProvider.Result.create(fqns, PsiModificationTracker.getInstance(project))
-        }
-    }
-
-    private fun collectAllModuleClassFqns(project: com.intellij.openapi.project.Project): Set<String> {
-        val result = mutableSetOf<String>()
-        val scope = GlobalSearchScope.allScope(project)
-        val facade = com.intellij.psi.JavaPsiFacade.getInstance(project)
-
-        for (annotationFqn in MODULE_ANNOTATIONS) {
-            val annotationClass = facade.findClass(annotationFqn, scope) ?: continue
-            com.intellij.psi.search.searches.AnnotatedElementsSearch
-                .searchPsiClasses(annotationClass, scope)
-                .forEach { psiClass ->
-                    addClassAndSupersFqns(psiClass, result)
-                }
-        }
-
-        // Also include @Generated Kora submodule classes
-        val generatedAnnotation = facade.findClass(KoraAnnotations.GENERATED, scope)
-        if (generatedAnnotation != null) {
-            com.intellij.psi.search.searches.AnnotatedElementsSearch
-                .searchPsiClasses(generatedAnnotation, scope)
-                .forEach { psiClass ->
-                    val uClass = psiClass.toUElement() as? UClass ?: return@forEach
-                    if (isKoraGenerated(uClass)) {
-                        addClassAndSupersFqns(psiClass, result)
-                    }
-                }
-        }
-
-        return result
-    }
-
-    private fun addClassAndSupersFqns(psiClass: PsiClass, result: MutableSet<String>) {
-        val fqn = psiClass.qualifiedName ?: return
-        if (!result.add(fqn)) return // already visited
-        // Recursively add all super interfaces so unannotated parent interfaces are also recognized
-        for (superIface in psiClass.interfaces) {
-            addClassAndSupersFqns(superIface, result)
-        }
     }
 
     private const val KORA_SUBMODULE_PROCESSOR = "ru.tinkoff.kora.kora.app.ksp.KoraSubmoduleProcessor"
