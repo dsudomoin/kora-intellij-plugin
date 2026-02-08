@@ -16,4 +16,27 @@ object KoraAnnotations {
     const val VALUE_OF_TYPE = "ru.tinkoff.kora.application.graph.ValueOf"
     const val GENERATED = "ru.tinkoff.kora.common.annotation.Generated"
     const val CONFIG_SOURCE = "ru.tinkoff.kora.config.common.annotation.ConfigSource"
+
+    // Kafka
+    const val KAFKA_LISTENER = "ru.tinkoff.kora.kafka.common.annotation.KafkaListener"
+
+    // Scheduling
+    const val SCHEDULE_AT_FIXED_RATE = "ru.tinkoff.kora.scheduling.common.annotation.ScheduleAtFixedRate"
+    const val SCHEDULE_WITH_FIXED_DELAY = "ru.tinkoff.kora.scheduling.common.annotation.ScheduleWithFixedDelay"
+    const val SCHEDULE_ONCE = "ru.tinkoff.kora.scheduling.common.annotation.ScheduleOnce"
+    const val SCHEDULE_WITH_CRON = "ru.tinkoff.kora.scheduling.common.annotation.ScheduleWithCron"
+
+    // Resilience
+    const val RETRY = "ru.tinkoff.kora.resilient.retry.annotation.Retry"
+    const val CIRCUIT_BREAKER = "ru.tinkoff.kora.resilient.circuitbreaker.annotation.CircuitBreaker"
+    const val TIMEOUT = "ru.tinkoff.kora.resilient.timeout.annotation.Timeout"
+    const val FALLBACK = "ru.tinkoff.kora.resilient.fallback.annotation.Fallback"
+
+    // Cache
+    const val CACHEABLE = "ru.tinkoff.kora.cache.annotation.Cacheable"
+    const val CACHE_PUT = "ru.tinkoff.kora.cache.annotation.CachePut"
+    const val CACHE_INVALIDATE = "ru.tinkoff.kora.cache.annotation.CacheInvalidate"
+
+    // HTTP Client
+    const val HTTP_CLIENT = "ru.tinkoff.kora.http.client.common.annotation.HttpClient"
 }

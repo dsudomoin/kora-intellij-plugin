@@ -6,6 +6,7 @@ import com.intellij.psi.PsiElement
 import com.intellij.psi.util.PsiTreeUtil
 import org.jetbrains.yaml.psi.YAMLKeyValue
 import ru.dsudomoin.koraplugin.config.ConfigPathResolver
+import ru.dsudomoin.koraplugin.config.KoraConfigAnnotationRegistry
 
 class YamlConfigGotoHandler : GotoDeclarationHandler {
 
@@ -22,9 +23,14 @@ class YamlConfigGotoHandler : GotoDeclarationHandler {
         if (!PsiTreeUtil.isAncestor(key, sourceElement, false)) return null
 
         val fullPath = buildYamlKeyPath(keyValue) ?: return null
-        val target = ConfigPathResolver.resolveConfigKeyToMethod(sourceElement.project, fullPath) ?: return null
 
-        return arrayOf(target)
+        val configSourceTarget = ConfigPathResolver.resolveConfigKeyToMethod(sourceElement.project, fullPath)
+        if (configSourceTarget != null) return arrayOf(configSourceTarget)
+
+        val annotationTargets = KoraConfigAnnotationRegistry.findAnnotatedElements(sourceElement.project, fullPath)
+        if (annotationTargets.isNotEmpty()) return annotationTargets.toTypedArray()
+
+        return null
     }
 
 }
