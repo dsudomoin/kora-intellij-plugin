@@ -23,6 +23,8 @@
                 implementation="ru.dsudomoin.koraplugin.navigation.KoraGotoDeclarationHandler"/>
         <gotoDeclarationHandler
                 implementation="ru.dsudomoin.koraplugin.config.yaml.YamlConfigGotoHandler"/>
+        <gotoDeclarationHandler
+                implementation="ru.dsudomoin.koraplugin.config.AnnotationValueGotoHandler"/>
         <codeInsight.lineMarkerProvider language="JAVA"
                 implementationClass="ru.dsudomoin.koraplugin.navigation.KoraLineMarkerProvider"/>
         <codeInsight.lineMarkerProvider language="kotlin"
