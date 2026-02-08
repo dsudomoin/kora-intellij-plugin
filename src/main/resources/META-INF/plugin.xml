@@ -31,6 +31,15 @@
                 implementationClass="ru.dsudomoin.koraplugin.config.ConfigSourceLineMarkerProvider"/>
         <codeInsight.lineMarkerProvider language="kotlin"
                 implementationClass="ru.dsudomoin.koraplugin.config.ConfigSourceLineMarkerProvider"/>
+
+        <localInspection
+                language="UAST"
+                groupName="Kora Framework"
+                shortName="KoraMissingProvider"
+                displayName="Missing Kora DI provider"
+                enabledByDefault="true"
+                level="WEAK WARNING"
+                implementationClass="ru.dsudomoin.koraplugin.inspection.KoraMissingProviderInspection"/>
     </extensions>
 
     <extensions defaultExtensionNs="org.jetbrains.kotlin">
