@@ -1,6 +1,8 @@
 package ru.dsudomoin.koraplugin
 
+import com.intellij.codeInsight.daemon.LineMarkerInfo
 import com.intellij.psi.PsiClass
+import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiIdentifier
 import com.intellij.psi.PsiMethod
 import com.intellij.psi.PsiParameter
@@ -23,6 +25,12 @@ class KoraLineMarkerProviderTest : BasePlatformTestCase() {
             "ru/tinkoff/kora/common/Tag.java",
             "ru/tinkoff/kora/application/graph/All.java",
         )
+    }
+
+    private fun collectMarkers(elements: List<PsiElement>): List<LineMarkerInfo<*>> {
+        val result = mutableListOf<LineMarkerInfo<*>>()
+        provider.collectSlowLineMarkers(elements.toMutableList(), result)
+        return result
     }
 
     private fun findParameterIdentifiers(): List<PsiIdentifier> {
@@ -77,7 +85,7 @@ class KoraLineMarkerProviderTest : BasePlatformTestCase() {
         val paramIdents = findParameterIdentifiers()
         assertFalse("Should find parameter identifiers", paramIdents.isEmpty())
 
-        val markers = paramIdents.mapNotNull { provider.getLineMarkerInfo(it) }
+        val markers = collectMarkers(paramIdents)
         assertFalse("Expected at least one Kora gutter icon", markers.isEmpty())
         assertEquals(KoraLineMarkerProvider.INJECTION_TOOLTIP, markers.first().lineMarkerTooltip)
     }
@@ -121,13 +129,13 @@ class KoraLineMarkerProviderTest : BasePlatformTestCase() {
         // Parameter on same line as factory method → no separate param marker
         val paramIdents = findParameterIdentifiers()
         assertFalse("Should find parameter identifiers", paramIdents.isEmpty())
-        val paramMarkers = paramIdents.mapNotNull { provider.getLineMarkerInfo(it) }
+        val paramMarkers = collectMarkers(paramIdents)
         assertTrue("Param marker should be suppressed (handled by factory method marker)", paramMarkers.isEmpty())
 
         // Factory method name gets combined marker instead
         val methodIdents = findMethodNameIdentifiers()
         assertFalse("Should find method name identifiers", methodIdents.isEmpty())
-        val methodMarkers = methodIdents.mapNotNull { provider.getLineMarkerInfo(it) }
+        val methodMarkers = collectMarkers(methodIdents)
         assertFalse("Expected combined gutter icon on factory method name", methodMarkers.isEmpty())
         assertEquals(KoraLineMarkerProvider.TOOLTIP_TEXT, methodMarkers.first().lineMarkerTooltip)
     }
@@ -147,7 +155,7 @@ class KoraLineMarkerProviderTest : BasePlatformTestCase() {
         val paramIdents = findParameterIdentifiers()
         assertFalse("Should find parameter identifiers", paramIdents.isEmpty())
 
-        val markers = paramIdents.mapNotNull { provider.getLineMarkerInfo(it) }
+        val markers = collectMarkers(paramIdents)
         assertTrue("Should not have Kora gutter icons on plain class", markers.isEmpty())
     }
 
@@ -169,7 +177,7 @@ class KoraLineMarkerProviderTest : BasePlatformTestCase() {
         val classIdents = findClassNameIdentifiers()
         assertFalse("Should find class name identifiers", classIdents.isEmpty())
 
-        val markers = classIdents.mapNotNull { provider.getLineMarkerInfo(it) }
+        val markers = collectMarkers(classIdents)
         assertFalse("Expected gutter icon on @Component class name", markers.isEmpty())
         assertEquals(KoraLineMarkerProvider.PROVIDER_TOOLTIP, markers.first().lineMarkerTooltip)
     }
@@ -201,7 +209,7 @@ class KoraLineMarkerProviderTest : BasePlatformTestCase() {
         val methodIdents = findMethodNameIdentifiers()
         assertFalse("Should find method name identifiers", methodIdents.isEmpty())
 
-        val markers = methodIdents.mapNotNull { provider.getLineMarkerInfo(it) }
+        val markers = collectMarkers(methodIdents)
         assertFalse("Expected gutter icon on factory method name", markers.isEmpty())
         assertEquals(KoraLineMarkerProvider.PROVIDER_TOOLTIP, markers.first().lineMarkerTooltip)
     }
@@ -224,7 +232,7 @@ class KoraLineMarkerProviderTest : BasePlatformTestCase() {
         val methodIdents = findMethodNameIdentifiers()
         assertFalse("Should find method name identifiers", methodIdents.isEmpty())
 
-        val markers = methodIdents.mapNotNull { provider.getLineMarkerInfo(it) }
+        val markers = collectMarkers(methodIdents)
         assertTrue("Should not have Kora gutter icon on void method", markers.isEmpty())
     }
 
@@ -243,8 +251,8 @@ class KoraLineMarkerProviderTest : BasePlatformTestCase() {
         val classIdents = findClassNameIdentifiers()
         val methodIdents = findMethodNameIdentifiers()
 
-        val classMarkers = classIdents.mapNotNull { provider.getLineMarkerInfo(it) }
-        val methodMarkers = methodIdents.mapNotNull { provider.getLineMarkerInfo(it) }
+        val classMarkers = collectMarkers(classIdents)
+        val methodMarkers = collectMarkers(methodIdents)
 
         assertTrue("Should not have Kora gutter icon on non-provider class", classMarkers.isEmpty())
         assertTrue("Should not have Kora gutter icon on non-provider method", methodMarkers.isEmpty())

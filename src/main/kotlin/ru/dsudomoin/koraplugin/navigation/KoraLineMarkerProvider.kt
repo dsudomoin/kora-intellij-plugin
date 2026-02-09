@@ -3,20 +3,22 @@ package ru.dsudomoin.koraplugin.navigation
 import com.intellij.codeInsight.daemon.GutterIconNavigationHandler
 import com.intellij.codeInsight.daemon.LineMarkerInfo
 import com.intellij.codeInsight.daemon.LineMarkerProvider
+import com.intellij.codeInsight.daemon.MergeableLineMarkerInfo
 import com.intellij.codeInsight.navigation.PsiTargetNavigator
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.editor.markup.GutterIconRenderer
 import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.progress.ProgressManager
+import com.intellij.openapi.project.DumbAware
+import com.intellij.openapi.project.DumbService
+import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.psi.PsiElement
-import com.intellij.psi.PsiIdentifier
 import com.intellij.psi.PsiMethod
 import com.intellij.psi.PsiTypes
 import com.intellij.ui.awt.RelativePoint
 import org.jetbrains.kotlin.psi.KtClass
 import org.jetbrains.kotlin.psi.KtNamedFunction
-import org.jetbrains.kotlin.psi.KtParameter
 import org.jetbrains.uast.UClass
 import org.jetbrains.uast.UMethod
 import org.jetbrains.uast.UParameter
@@ -28,39 +30,55 @@ import ru.dsudomoin.koraplugin.resolve.InjectionPointDetector
 import ru.dsudomoin.koraplugin.resolve.KoraBeanNavigator
 import ru.dsudomoin.koraplugin.resolve.KoraProviderResolver
 import ru.dsudomoin.koraplugin.resolve.ParamProviders
+import ru.dsudomoin.koraplugin.util.KoraLibraryUtil
+import ru.dsudomoin.koraplugin.util.isParameterIdentifier
 import java.awt.event.MouseEvent
+import javax.swing.Icon
 
-class KoraLineMarkerProvider : LineMarkerProvider {
+class KoraLineMarkerProvider : LineMarkerProvider, DumbAware {
 
-    override fun getLineMarkerInfo(element: PsiElement): LineMarkerInfo<*>? {
-        // 1. @Component class name → usages icon (combined with constructor params if on same line)
-        val componentFqn = getComponentClassFqn(element)
-        if (componentFqn != null) {
-            return createComponentClassMarker(element, componentFqn)
+    override fun getLineMarkerInfo(element: PsiElement): LineMarkerInfo<*>? = null
+
+    override fun collectSlowLineMarkers(
+        elements: MutableList<out PsiElement>,
+        result: MutableCollection<in LineMarkerInfo<*>>,
+    ) {
+        val first = elements.firstOrNull() ?: return
+        val project = first.project
+        if (DumbService.isDumb(project)) return
+        if (!KoraLibraryUtil.hasKoraLibrary(project)) return
+
+        for (element in elements) {
+            ProgressManager.checkCanceled()
+
+            // 1. @Component class name → usages icon (combined with constructor params if on same line)
+            val componentFqn = getComponentClassFqn(element)
+            if (componentFqn != null) {
+                result.add(createComponentClassMarker(element, componentFqn))
+                continue
+            }
+
+            // 2. Factory method name → combined icon (usages + same-line params)
+            val factoryInfo = getFactoryMethodInfo(element)
+            if (factoryInfo != null) {
+                result.add(createFactoryMethodMarker(element, factoryInfo))
+                continue
+            }
+
+            // 3. Injection point parameter → providers icon
+            if (isParameterIdentifier(element)) {
+                val marker = getInjectionPointLineMarker(element)
+                if (marker != null) {
+                    result.add(marker)
+                }
+            }
         }
-
-        // 2. Factory method name → combined icon (usages + same-line params)
-        val factoryInfo = getFactoryMethodInfo(element)
-        if (factoryInfo != null) {
-            return createFactoryMethodMarker(element, factoryInfo)
-        }
-
-        // 3. Injection point parameter → providers icon
-        //    (but skip if factory method or @Component class name is on the same line — handled by #1/#2)
-        if (isParameterIdentifier(element)) {
-            return getInjectionPointLineMarker(element)
-        }
-
-        return null
     }
 
     // --- Identifier checks ---
 
     private data class FactoryMethodInfo(val classFqn: String, val methodName: String)
 
-    /**
-     * If element is the name identifier of a @Component / @Repository class, returns the class FQN.
-     */
     private fun getComponentClassFqn(element: PsiElement): String? {
         val parent = element.parent
         when (parent) {
@@ -79,10 +97,6 @@ class KoraLineMarkerProvider : LineMarkerProvider {
         }
     }
 
-    /**
-     * If element is the name identifier of a factory method in a Kora module, returns the
-     * containing class FQN and method name.
-     */
     private fun getFactoryMethodInfo(element: PsiElement): FactoryMethodInfo? {
         val parent = element.parent
         when (parent) {
@@ -113,19 +127,12 @@ class KoraLineMarkerProvider : LineMarkerProvider {
         }
     }
 
-    private fun isParameterIdentifier(element: PsiElement): Boolean {
-        if (element is PsiIdentifier && element.parent is com.intellij.psi.PsiParameter) return true
-        if (element.node?.elementType?.toString() == "IDENTIFIER" && element.parent is KtParameter) return true
-        return false
-    }
-
     // --- @Component class marker (combined with constructor params if on same line) ---
 
     private fun createComponentClassMarker(element: PsiElement, classFqn: String): LineMarkerInfo<PsiElement> {
         val uClass = element.getUastParentOfType<UClass>()
         val document = element.containingFile?.viewProvider?.document
 
-        // Find constructor params on the same line as the class name
         val sameLineParamNames = if (uClass != null && document != null) {
             val myLine = document.getLineNumber(element.textOffset)
             val constructor = uClass.methods.firstOrNull { it.isConstructor }
@@ -144,13 +151,12 @@ class KoraLineMarkerProvider : LineMarkerProvider {
         }
     }
 
-    // --- Factory method marker (combined: usages of the method + providers for params) ---
+    // --- Factory method marker ---
 
     private fun createFactoryMethodMarker(element: PsiElement, info: FactoryMethodInfo): LineMarkerInfo<PsiElement> {
         val uMethod = element.getUastParentOfType<UMethod>()
         val document = element.containingFile?.viewProvider?.document
 
-        // Collect parameter names on the same line as the method name
         val sameLineParamNames = if (uMethod != null && document != null) {
             val myLine = document.getLineNumber(element.textOffset)
             uMethod.uastParameters.filter { p ->
@@ -181,21 +187,21 @@ class KoraLineMarkerProvider : LineMarkerProvider {
         val document = element.containingFile?.viewProvider?.document ?: return null
         val myLine = document.getLineNumber(element.textOffset)
 
-        // If @Component/@Repository class name is on the same line → skip (component class marker handles it)
+        // If @Component/@Repository class name is on the same line → skip
         if (uMethod.isConstructor && KoraAnnotations.COMPONENT_LIKE.any { uClass.javaPsi.hasAnnotation(it) }) {
             val classNameElement = getClassNameIdentifier(uClass)
             if (classNameElement != null && document.getLineNumber(classNameElement.textOffset) == myLine) {
-                return null // component class marker on this line will handle params
+                return null
             }
         }
 
-        // If factory method name is on the same line → skip (factory method marker handles it)
+        // If factory method name is on the same line → skip
         if (!uMethod.isConstructor) {
             val methodNameElement = getMethodNameIdentifier(uMethod)
             if (methodNameElement != null && document.getLineNumber(methodNameElement.textOffset) == myLine) {
                 val returnType = uMethod.javaPsi.returnType
                 if (returnType != null && returnType != PsiTypes.voidType()) {
-                    return null // factory method marker on this line will handle params
+                    return null
                 }
             }
         }
@@ -240,15 +246,29 @@ class KoraLineMarkerProvider : LineMarkerProvider {
         tooltip: String,
         handler: GutterIconNavigationHandler<PsiElement>,
     ): LineMarkerInfo<PsiElement> {
-        return LineMarkerInfo(
-            element,
-            element.textRange,
-            AllIcons.Nodes.Plugin,
-            { tooltip },
-            handler,
-            GutterIconRenderer.Alignment.RIGHT,
-            { tooltip },
-        )
+        return KoraMergeableLineMarkerInfo(element, tooltip, handler)
+    }
+
+    private class KoraMergeableLineMarkerInfo(
+        element: PsiElement,
+        private val tooltip: String,
+        handler: GutterIconNavigationHandler<PsiElement>,
+    ) : MergeableLineMarkerInfo<PsiElement>(
+        element,
+        element.textRange,
+        AllIcons.Nodes.Plugin,
+        { tooltip },
+        handler,
+        GutterIconRenderer.Alignment.RIGHT,
+        { tooltip },
+    ) {
+        override fun canMergeWith(info: MergeableLineMarkerInfo<*>): Boolean {
+            return info is KoraMergeableLineMarkerInfo
+        }
+
+        override fun getCommonIcon(infos: MutableList<out MergeableLineMarkerInfo<*>>): Icon {
+            return AllIcons.Nodes.Plugin
+        }
     }
 
     companion object {
@@ -259,10 +279,6 @@ class KoraLineMarkerProvider : LineMarkerProvider {
 
     // --- Navigation handlers ---
 
-    /**
-     * For provider elements (@Component class or factory method): show usages.
-     * Stores classFqn (and optional methodName) at creation time to avoid SmartPointer issues.
-     */
     private class ProviderUsagesNavigationHandler(
         private val classFqn: String,
         private val methodName: String?,
@@ -290,11 +306,6 @@ class KoraLineMarkerProvider : LineMarkerProvider {
         }
     }
 
-    /**
-     * Combined handler for provider element + same-line params.
-     * Two-level popup: first choose category, then drill down lazily.
-     * Works for both @Component classes (methodName=null) and factory methods (methodName!=null).
-     */
     private class CombinedNavigationHandler(
         private val classFqn: String,
         private val methodName: String?,
@@ -317,7 +328,7 @@ class KoraLineMarkerProvider : LineMarkerProvider {
                 .show(RelativePoint(e))
         }
 
-        private fun navigateToUsagesLazy(e: MouseEvent, project: com.intellij.openapi.project.Project) {
+        private fun navigateToUsagesLazy(e: MouseEvent, project: Project) {
             var usages: List<PsiElement> = emptyList()
             ProgressManager.getInstance().runProcessWithProgressSynchronously(
                 {
@@ -336,7 +347,7 @@ class KoraLineMarkerProvider : LineMarkerProvider {
             navigateToElements(e, project, usages, "Choose Injection Site", "No injection sites found")
         }
 
-        private fun navigateToProvidersLazy(e: MouseEvent, project: com.intellij.openapi.project.Project) {
+        private fun navigateToProvidersLazy(e: MouseEvent, project: Project) {
             var paramProviders: List<ParamProviders> = emptyList()
             ProgressManager.getInstance().runProcessWithProgressSynchronously(
                 {
@@ -395,7 +406,6 @@ class KoraLineMarkerProvider : LineMarkerProvider {
         }
     }
 
-    /** For a single injection point parameter: show providers. */
     private class SingleParamNavigationHandler : GutterIconNavigationHandler<PsiElement> {
         override fun navigate(e: MouseEvent, elt: PsiElement) {
             val targets = KoraProviderResolver.resolve(elt).distinct()
@@ -403,7 +413,6 @@ class KoraLineMarkerProvider : LineMarkerProvider {
         }
     }
 
-    /** For multiple parameters on the same line (no factory method): choose parameter, then show providers. */
     private class MultiParamNavigationHandler(
         private val params: List<UParameter>,
     ) : GutterIconNavigationHandler<PsiElement> {
@@ -451,7 +460,7 @@ private fun navigateToElement(element: PsiElement) {
 
 private fun navigateToElements(
     e: MouseEvent,
-    project: com.intellij.openapi.project.Project,
+    project: Project,
     elements: List<PsiElement>,
     title: String,
     emptyMessage: String = "Nothing found",

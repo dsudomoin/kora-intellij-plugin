@@ -1,0 +1,28 @@
+<html>
+<body>
+Reports parameters in Kora DI injection points (constructors, factory methods) for which no provider is found in the project.
+<p>
+    The inspection analyzes parameters of <code>@Component</code> constructors and factory methods in
+    <code>@KoraApp</code>, <code>@Module</code>, and <code>@KoraSubmodule</code> interfaces.
+    For each required dependency type, it searches for a matching provider &mdash; a class annotated with
+    <code>@Component</code> or a factory method returning the required type. If no provider is found,
+    the parameter is highlighted with a warning.
+</p>
+<p>
+    Parameters of type <code>All&lt;T&gt;</code> are not checked, since an empty collection is a valid result.
+</p>
+<p>Example:</p>
+<pre><code>
+@Component
+public class MyController {
+    // Warning: no provider found for 'MyService'
+    public MyController(MyService myService) {}
+}
+</code></pre>
+<!-- tooltip end -->
+<p>
+    This inspection helps catch missing dependency bindings at development time,
+    before they cause errors at application startup.
+</p>
+</body>
+</html>

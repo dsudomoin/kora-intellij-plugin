@@ -7,6 +7,7 @@ import com.intellij.psi.util.PsiTreeUtil
 import org.jetbrains.yaml.psi.YAMLKeyValue
 import ru.dsudomoin.koraplugin.config.ConfigPathResolver
 import ru.dsudomoin.koraplugin.config.KoraConfigAnnotationRegistry
+import ru.dsudomoin.koraplugin.util.KoraLibraryUtil
 
 class YamlConfigGotoHandler : GotoDeclarationHandler {
 
@@ -16,6 +17,7 @@ class YamlConfigGotoHandler : GotoDeclarationHandler {
         editor: Editor?,
     ): Array<PsiElement>? {
         if (sourceElement == null) return null
+        if (!KoraLibraryUtil.hasKoraLibrary(sourceElement.project)) return null
 
         val keyValue = PsiTreeUtil.getParentOfType(sourceElement, YAMLKeyValue::class.java) ?: return null
         // Only trigger on the key part, not the value
