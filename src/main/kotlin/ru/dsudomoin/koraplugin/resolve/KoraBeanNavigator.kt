@@ -15,7 +15,6 @@ import org.jetbrains.kotlin.psi.KtClass
 import org.jetbrains.kotlin.psi.KtNamedFunction
 import org.jetbrains.uast.UClass
 import org.jetbrains.uast.UMethod
-import org.jetbrains.uast.UParameter
 import org.jetbrains.uast.getParentOfType
 import org.jetbrains.uast.getUastParentOfType
 import org.jetbrains.uast.toUElement
@@ -43,8 +42,8 @@ object KoraBeanNavigator {
         if (injectionResult != null) return injectionResult
 
         // Try as provider element (@Component class or factory method)
-        val providerResult = resolveForProvider(element)
-        if (providerResult != null) return providerResult
+        val factoryResult = resolveForProvider(element)
+        if (factoryResult != null) return factoryResult
 
         return null
     }
@@ -140,7 +139,8 @@ object KoraBeanNavigator {
             val providers = findProvidersForType(project, resolvedType, scope)
 
             val matching = providers.filter { provider ->
-                matchesTypeAssignable(resolvedType, provider.providedType) && matchesProviderTags(tagInfo, provider.tagInfo)
+                KoraTypeMatching.isTypeAssignable(resolvedType, provider.providedType) &&
+                    KoraTypeMatching.isTagMatch(tagInfo, provider.tagInfo)
             }.map { it.element }.distinct()
 
             // Prefer factory methods over class declarations
@@ -155,12 +155,6 @@ object KoraBeanNavigator {
         return result
     }
 
-    private fun matchesProviderTags(required: TagInfo, provided: TagInfo): Boolean {
-        if (required.isTagAny) return true
-        if (required.tagFqns.isEmpty()) return provided.tagFqns.isEmpty()
-        return required.tagFqns == provided.tagFqns
-    }
-
     private fun resolveDeclarationUsages(declaration: PsiElement): List<PsiElement> {
         val project = declaration.project
         val providedType: PsiType
@@ -170,7 +164,7 @@ object KoraBeanNavigator {
             is PsiClass -> {
                 if (KoraAnnotations.COMPONENT_LIKE.none { declaration.hasAnnotation(it) }) return emptyList()
                 val uClass = declaration.toUElement() as? UClass ?: return emptyList()
-                val facade = com.intellij.psi.JavaPsiFacade.getInstance(project)
+                val facade = JavaPsiFacade.getInstance(project)
                 providedType = facade.elementFactory.createType(declaration)
                 tagInfo = TagExtractor.extractTags(uClass)
             }
@@ -178,14 +172,14 @@ object KoraBeanNavigator {
                 val uClass = declaration.toUElement() as? UClass ?: return emptyList()
                 val psiClass = uClass.javaPsi
                 if (KoraAnnotations.COMPONENT_LIKE.none { psiClass.hasAnnotation(it) }) return emptyList()
-                val facade = com.intellij.psi.JavaPsiFacade.getInstance(project)
+                val facade = JavaPsiFacade.getInstance(project)
                 providedType = facade.elementFactory.createType(psiClass)
                 tagInfo = TagExtractor.extractTags(uClass)
             }
             is PsiMethod -> {
                 if (declaration.isConstructor) return emptyList()
                 val returnType = declaration.returnType ?: return emptyList()
-                if (returnType == com.intellij.psi.PsiTypes.voidType()) return emptyList()
+                if (returnType == PsiTypes.voidType()) return emptyList()
                 val uMethod = declaration.toUElement() as? UMethod ?: return emptyList()
                 providedType = returnType
                 tagInfo = TagExtractor.extractTags(uMethod)
@@ -194,7 +188,7 @@ object KoraBeanNavigator {
                 val uMethod = declaration.toUElement() as? UMethod ?: return emptyList()
                 if (uMethod.isConstructor) return emptyList()
                 val returnType = uMethod.javaPsi.returnType ?: return emptyList()
-                if (returnType == com.intellij.psi.PsiTypes.voidType()) return emptyList()
+                if (returnType == PsiTypes.voidType()) return emptyList()
                 providedType = returnType
                 tagInfo = TagExtractor.extractTags(uMethod)
             }
@@ -204,7 +198,8 @@ object KoraBeanNavigator {
         // Use index-backed lookup: query by provided type FQN + its supertypes
         val sites = findInjectionSitesForProvidedType(project, providedType)
         return sites.filter { site ->
-            matchesProviderToSite(providedType, tagInfo, site)
+            KoraTypeMatching.isTypeAssignable(site.requiredType, providedType) &&
+                KoraTypeMatching.isTagMatch(site.tagInfo, tagInfo)
         }.map { it.element }.distinct()
     }
 
@@ -224,8 +219,8 @@ object KoraBeanNavigator {
         }
         val usages = sites.filter { site ->
             site.element != element &&
-                matchesTypeForSite(injectionPoint.requiredType, site.requiredType) &&
-                matchesTagsSymmetric(injectionPoint.tagInfo, site.tagInfo)
+                KoraTypeMatching.isTypeEqual(injectionPoint.requiredType, site.requiredType) &&
+                KoraTypeMatching.isTagMatchSymmetric(injectionPoint.tagInfo, site.tagInfo)
         }.map { it.element }.distinct()
 
         LOG.info("InjectionPoint resolve: providers=${providers.size}, usages=${usages.size}")
@@ -233,8 +228,6 @@ object KoraBeanNavigator {
     }
 
     private fun resolveForProvider(element: PsiElement): BeanNavigationTargets? {
-        val project = element.project
-
         // Check if this is a @Component class identifier
         val componentResult = resolveComponentClass(element)
         if (componentResult != null) return componentResult
@@ -266,7 +259,7 @@ object KoraBeanNavigator {
         if (KoraAnnotations.COMPONENT_LIKE.none { psiClass.hasAnnotation(it) }) return null
 
         val project = element.project
-        val facade = com.intellij.psi.JavaPsiFacade.getInstance(project)
+        val facade = JavaPsiFacade.getInstance(project)
         val providedType = facade.elementFactory.createType(psiClass)
         val tagInfo = TagExtractor.extractTags(uClass)
 
@@ -291,7 +284,7 @@ object KoraBeanNavigator {
         }
 
         val returnType = uMethod.javaPsi.returnType ?: return null
-        if (returnType == com.intellij.psi.PsiTypes.voidType()) return null
+        if (returnType == PsiTypes.voidType()) return null
 
         val uClass = uMethod.getParentOfType<UClass>() ?: return null
         if (!InjectionPointDetector.isKoraInjectionContext(uMethod, uClass) &&
@@ -310,22 +303,23 @@ object KoraBeanNavigator {
         selfElement: PsiElement,
         providedType: PsiType,
         tagInfo: TagInfo,
-        project: com.intellij.openapi.project.Project,
+        project: Project,
     ): BeanNavigationTargets {
         val scope = GlobalSearchScope.allScope(project)
 
         // Find usages: injection sites where our type/tags match (index-backed)
         val sites = findInjectionSitesForProvidedType(project, providedType)
         val usages = sites.filter { site ->
-            matchesProviderToSite(providedType, tagInfo, site)
+            KoraTypeMatching.isTypeAssignable(site.requiredType, providedType) &&
+                KoraTypeMatching.isTagMatch(site.tagInfo, tagInfo)
         }.map { it.element }.distinct()
 
         // Find other providers of the same type (excluding self) (index-backed)
         val providers = findProvidersForType(project, providedType, scope)
         val otherProviders = providers.filter { provider ->
             provider.element != selfElement &&
-                matchesTypeAssignable(providedType, provider.providedType) &&
-                matchesTagsExact(tagInfo, provider.tagInfo)
+                KoraTypeMatching.isTypeAssignable(providedType, provider.providedType) &&
+                KoraTypeMatching.isTagMatchExact(tagInfo, provider.tagInfo)
         }.map { it.element }.distinct()
 
         LOG.info("Provider resolve: otherProviders=${otherProviders.size}, usages=${usages.size}")
@@ -375,73 +369,5 @@ object KoraBeanNavigator {
         // Fallback to full scan if index not available or returns nothing
         return result?.ifEmpty { InjectionSiteSearch.findAllInjectionSites(project) }
             ?: InjectionSiteSearch.findAllInjectionSites(project)
-    }
-
-    private fun matchesProviderToSite(
-        providedType: PsiType,
-        providerTags: TagInfo,
-        site: KoraInjectionSite,
-    ): Boolean {
-        val requiredType = site.requiredType
-        val requiredTags = site.tagInfo
-
-        // Type check: provider type must be assignable to required type
-        if (!matchesTypeAssignable(requiredType, providedType)) return false
-
-        // Tag check
-        if (requiredTags.isTagAny) return true
-        if (requiredTags.tagFqns.isEmpty()) return providerTags.tagFqns.isEmpty()
-        return requiredTags.tagFqns == providerTags.tagFqns
-    }
-
-    private fun matchesTypeAssignable(requiredType: PsiType, providedType: PsiType): Boolean {
-        // Full type check including generics
-        if (requiredType.isAssignableFrom(providedType)) return true
-
-        if (requiredType is PsiClassType && providedType is PsiClassType) {
-            val requiredClass = requiredType.resolve() ?: return false
-            val providedClass = providedType.resolve() ?: return false
-
-            // Raw class must be compatible
-            if (requiredClass != providedClass && !providedClass.isInheritor(requiredClass, true)) return false
-
-            // When same raw class and both have type arguments, verify arguments match
-            if (requiredClass == providedClass) {
-                val reqArgs = requiredType.parameters
-                val provArgs = providedType.parameters
-                if (reqArgs.isNotEmpty() && provArgs.isNotEmpty() && reqArgs.size == provArgs.size) {
-                    return reqArgs.zip(provArgs).all { (r, p) ->
-                        // Type variable (e.g. <T>) matches anything
-                        if (p is PsiClassType && p.resolve() is com.intellij.psi.PsiTypeParameter) return@all true
-                        if (r is PsiClassType && r.resolve() is com.intellij.psi.PsiTypeParameter) return@all true
-                        matchesTypeAssignable(r, p)
-                    }
-                }
-            }
-
-            return true
-        }
-
-        return false
-    }
-
-    private fun matchesTypeForSite(type1: PsiType, type2: PsiType): Boolean {
-        // For finding sibling injection points, check if they request the same type
-        if (type1 == type2) return true
-        if (type1 is PsiClassType && type2 is PsiClassType) {
-            val class1 = type1.resolve()
-            val class2 = type2.resolve()
-            return class1 != null && class1 == class2
-        }
-        return false
-    }
-
-    private fun matchesTagsSymmetric(tags1: TagInfo, tags2: TagInfo): Boolean {
-        if (tags1.isTagAny || tags2.isTagAny) return true
-        return tags1.tagFqns == tags2.tagFqns
-    }
-
-    private fun matchesTagsExact(tags1: TagInfo, tags2: TagInfo): Boolean {
-        return tags1.tagFqns == tags2.tagFqns && tags1.isTagAny == tags2.isTagAny
     }
 }

@@ -7,6 +7,8 @@ import com.intellij.codeInsight.navigation.PsiTargetNavigator
 import com.intellij.codeInsight.navigation.openFileWithPsiElement
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.editor.markup.GutterIconRenderer
+import com.intellij.openapi.project.DumbAware
+import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.project.Project
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiIdentifier
@@ -29,11 +31,15 @@ import com.intellij.openapi.ui.popup.Balloon
 import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.ui.awt.RelativePoint
 import ru.dsudomoin.koraplugin.KoraAnnotations
+import ru.dsudomoin.koraplugin.util.KoraLibraryUtil
 import java.awt.event.MouseEvent
 
-class ConfigSourceLineMarkerProvider : LineMarkerProvider {
+class ConfigSourceLineMarkerProvider : LineMarkerProvider, DumbAware {
 
     override fun getLineMarkerInfo(element: PsiElement): LineMarkerInfo<*>? {
+        val project = element.project
+        if (DumbService.isDumb(project)) return null
+        if (!KoraLibraryUtil.hasKoraLibrary(project)) return null
         if (!isConfigMemberIdentifier(element)) return null
 
         val uClass = findContainingConfigClass(element) ?: return null

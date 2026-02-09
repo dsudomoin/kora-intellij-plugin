@@ -42,6 +42,18 @@
                 enabledByDefault="true"
                 level="WEAK WARNING"
                 implementationClass="ru.dsudomoin.koraplugin.inspection.KoraMissingProviderInspection"/>
+
+        <completion.contributor language="yaml"
+                implementationClass="ru.dsudomoin.koraplugin.config.yaml.KoraYamlCompletionContributor"/>
+
+        <localInspection
+                language="yaml"
+                groupName="Kora Framework"
+                shortName="KoraUnknownConfigKey"
+                displayName="Unknown Kora config key"
+                enabledByDefault="false"
+                level="WEAK WARNING"
+                implementationClass="ru.dsudomoin.koraplugin.inspection.KoraUnknownConfigKeyInspection"/>
     </extensions>
 
     <extensions defaultExtensionNs="org.jetbrains.kotlin">

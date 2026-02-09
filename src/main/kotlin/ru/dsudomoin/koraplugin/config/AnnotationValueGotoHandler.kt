@@ -9,6 +9,7 @@ import org.jetbrains.kotlin.psi.KtAnnotationEntry
 import org.jetbrains.kotlin.psi.KtStringTemplateExpression
 import org.jetbrains.uast.UAnnotation
 import org.jetbrains.uast.toUElement
+import ru.dsudomoin.koraplugin.util.KoraLibraryUtil
 
 /**
  * Handles Ctrl+Click on string literal values inside Kora config annotations.
@@ -22,6 +23,7 @@ class AnnotationValueGotoHandler : GotoDeclarationHandler {
         editor: Editor?,
     ): Array<PsiElement>? {
         if (sourceElement == null) return null
+        if (!KoraLibraryUtil.hasKoraLibrary(sourceElement.project)) return null
 
         // Check we're inside a string literal
         if (!isInsideStringLiteral(sourceElement)) return null
