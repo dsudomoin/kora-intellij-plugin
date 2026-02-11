@@ -18,6 +18,7 @@ import org.jetbrains.uast.UParameter
 import org.jetbrains.uast.toUElement
 import ru.dsudomoin.koraplugin.KoraAnnotations
 import ru.dsudomoin.koraplugin.index.KoraInjectionSiteIndex
+import ru.dsudomoin.koraplugin.util.KoraAnnotationSearch
 
 data class KoraInjectionSite(
     val element: PsiElement,
@@ -58,17 +59,13 @@ object InjectionSiteSearch {
     }
 
     private fun findComponentConstructorSites(project: Project, allScope: GlobalSearchScope, projectScope: GlobalSearchScope): List<KoraInjectionSite> {
-        val facade = JavaPsiFacade.getInstance(project)
         val result = mutableListOf<KoraInjectionSite>()
 
-        for (annotationFqn in KoraAnnotations.COMPONENT_LIKE) {
-            val annotationClass = facade.findClass(annotationFqn, allScope) ?: continue
-            AnnotatedElementsSearch.searchPsiClasses(annotationClass, projectScope).forEach { psiClass ->
-                val uClass = psiClass.toUElement() as? UClass ?: return@forEach
-                for (method in uClass.methods) {
-                    if (!method.isConstructor) continue
-                    collectParameterSites(method, result)
-                }
+        for (psiClass in KoraAnnotationSearch.findAnnotatedClasses(KoraAnnotations.COMPONENT_LIKE, project, projectScope)) {
+            val uClass = psiClass.toUElement() as? UClass ?: continue
+            for (method in uClass.methods) {
+                if (!method.isConstructor) continue
+                collectParameterSites(method, result)
             }
         }
         return result

@@ -16,6 +16,8 @@ import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiMethod
 import com.intellij.psi.PsiTypes
+import com.intellij.ui.ColoredListCellRenderer
+import com.intellij.ui.SimpleTextAttributes
 import com.intellij.ui.awt.RelativePoint
 import org.jetbrains.kotlin.psi.KtClass
 import org.jetbrains.kotlin.psi.KtNamedFunction
@@ -34,6 +36,7 @@ import ru.dsudomoin.koraplugin.util.KoraLibraryUtil
 import ru.dsudomoin.koraplugin.util.isParameterIdentifier
 import java.awt.event.MouseEvent
 import javax.swing.Icon
+import javax.swing.JList
 
 class KoraLineMarkerProvider : LineMarkerProvider, DumbAware {
 
@@ -285,16 +288,17 @@ class KoraLineMarkerProvider : LineMarkerProvider, DumbAware {
     ) : GutterIconNavigationHandler<PsiElement> {
         override fun navigate(e: MouseEvent, elt: PsiElement) {
             val project = elt.project
-            var usages: List<PsiElement> = emptyList()
+            var targets: List<InjectionSiteTarget> = emptyList()
 
             ProgressManager.getInstance().runProcessWithProgressSynchronously(
                 {
-                    usages = ReadAction.compute<List<PsiElement>, RuntimeException> {
-                        if (methodName != null) {
+                    targets = ReadAction.compute<List<InjectionSiteTarget>, RuntimeException> {
+                        val usages = if (methodName != null) {
                             KoraBeanNavigator.resolveFactoryMethodUsages(project, classFqn, methodName)
                         } else {
                             KoraBeanNavigator.resolveComponentUsages(project, classFqn)
                         }
+                        buildInjectionSiteTargets(usages)
                     }
                 },
                 "Searching for Kora DI usages...",
@@ -302,7 +306,7 @@ class KoraLineMarkerProvider : LineMarkerProvider, DumbAware {
                 project,
             )
 
-            navigateToElements(e, project, usages, "Choose Kora DI Usage", "No injection sites found")
+            navigateToInjectionSites(e, project, targets, "Choose Kora DI Usage")
         }
     }
 
@@ -329,22 +333,23 @@ class KoraLineMarkerProvider : LineMarkerProvider, DumbAware {
         }
 
         private fun navigateToUsagesLazy(e: MouseEvent, project: Project) {
-            var usages: List<PsiElement> = emptyList()
+            var targets: List<InjectionSiteTarget> = emptyList()
             ProgressManager.getInstance().runProcessWithProgressSynchronously(
                 {
-                    usages = ReadAction.compute<List<PsiElement>, RuntimeException> {
-                        if (methodName != null) {
+                    targets = ReadAction.compute<List<InjectionSiteTarget>, RuntimeException> {
+                        val usages = if (methodName != null) {
                             KoraBeanNavigator.resolveFactoryMethodUsages(project, classFqn, methodName)
                         } else {
                             KoraBeanNavigator.resolveComponentUsages(project, classFqn)
                         }
+                        buildInjectionSiteTargets(usages)
                     }
                 },
                 "Searching for injection sites...",
                 true,
                 project,
             )
-            navigateToElements(e, project, usages, "Choose Injection Site", "No injection sites found")
+            navigateToInjectionSites(e, project, targets, "Choose Injection Site")
         }
 
         private fun navigateToProvidersLazy(e: MouseEvent, project: Project) {
@@ -444,6 +449,77 @@ class KoraLineMarkerProvider : LineMarkerProvider, DumbAware {
                     val targets = KoraProviderResolver.resolve(nameElement).distinct()
                     navigateToElements(e, elt.project, targets, "Choose Kora DI Provider", "No providers found")
                 }
+                .createPopup()
+                .show(RelativePoint(e))
+        }
+    }
+}
+
+private data class InjectionSiteTarget(
+    val element: PsiElement,
+    val paramName: String,
+    val containingClassName: String,
+    val methodSignature: String,
+)
+
+private fun buildInjectionSiteTargets(elements: List<PsiElement>): List<InjectionSiteTarget> {
+    return elements.mapNotNull { element ->
+        // element can be PsiIdentifier (Java nameIdentifier) or KtParameter (Kotlin param).
+        // For KtParameter, toUElement() converts it directly to UParameter;
+        // getUastParentOfType would skip self and return null.
+        val uParam = element.toUElement() as? UParameter
+            ?: element.getUastParentOfType<UParameter>()
+            ?: return@mapNotNull null
+        val uMethod = uParam.getParentOfType<UMethod>() ?: return@mapNotNull null
+        val uClass = uMethod.getParentOfType<UClass>() ?: return@mapNotNull null
+
+        val paramName = uParam.name
+        val className = uClass.name ?: return@mapNotNull null
+
+        val methodDisplayName = if (uMethod.isConstructor) className else uMethod.name
+        val methodSignature = "$className.$methodDisplayName"
+
+        InjectionSiteTarget(element, paramName, className, methodSignature)
+    }
+}
+
+private class InjectionSiteRenderer : ColoredListCellRenderer<InjectionSiteTarget>() {
+    override fun customizeCellRenderer(
+        list: JList<out InjectionSiteTarget>,
+        value: InjectionSiteTarget?,
+        index: Int,
+        selected: Boolean,
+        hasFocus: Boolean,
+    ) {
+        if (value == null) return
+        icon = AllIcons.Nodes.Parameter
+        append(value.paramName, SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES)
+        append("  (${value.methodSignature})", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+    }
+}
+
+private fun navigateToInjectionSites(
+    e: MouseEvent,
+    project: Project,
+    targets: List<InjectionSiteTarget>,
+    title: String,
+    emptyMessage: String = "No injection sites found",
+) {
+    when (targets.size) {
+        0 -> {
+            JBPopupFactory.getInstance()
+                .createHtmlTextBalloonBuilder(emptyMessage, com.intellij.openapi.ui.MessageType.WARNING, null)
+                .createBalloon()
+                .show(RelativePoint(e), com.intellij.openapi.ui.popup.Balloon.Position.above)
+        }
+        1 -> navigateToElement(targets.single().element)
+        else -> {
+            JBPopupFactory.getInstance()
+                .createPopupChooserBuilder(targets)
+                .setTitle(title)
+                .setRenderer(InjectionSiteRenderer())
+                .setNamerForFiltering { it.paramName }
+                .setItemChosenCallback { navigateToElement(it.element) }
                 .createPopup()
                 .show(RelativePoint(e))
         }

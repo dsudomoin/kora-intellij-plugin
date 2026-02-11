@@ -147,11 +147,24 @@ object KoraIndexUtil {
     }
 
     private fun hasKtAnnotation(cls: KtClassOrObject, shortName: String, fqn: String): Boolean {
-        val hasAnnotation = cls.annotationEntries.any { entry ->
-            entry.shortName?.asString() == shortName
+        val file = cls.containingKtFile
+        for (entry in cls.annotationEntries) {
+            val entryName = entry.shortName?.asString() ?: continue
+            // Direct match: @Component with import ru.tinkoff.kora.common.Component
+            if (entryName == shortName && isFqnAccessible(file, fqn)) return true
+            // Import alias: @KoraComponent with import ru.tinkoff.kora.common.Component as KoraComponent
+            if (entryName != shortName && isKtImportAlias(file, entryName, fqn)) return true
         }
-        if (!hasAnnotation) return false
-        return isFqnAccessible(cls.containingKtFile, fqn)
+        return false
+    }
+
+    private fun isKtImportAlias(file: KtFile, aliasName: String, fqn: String): Boolean {
+        for (directive in file.importDirectives) {
+            val alias = directive.alias?.name ?: continue
+            val importPath = directive.importPath?.pathStr ?: continue
+            if (alias == aliasName && importPath == fqn) return true
+        }
+        return false
     }
 
     private fun isKoraGeneratedKtSubmodule(cls: KtClassOrObject): Boolean {

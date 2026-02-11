@@ -27,7 +27,7 @@ class KoraProviderIndex : FileBasedIndexExtension<String, List<ProviderIndexEntr
 
     override fun getName(): ID<String, List<ProviderIndexEntry>> = NAME
 
-    override fun getVersion(): Int = 8
+    override fun getVersion(): Int = 9
 
     override fun dependsOnFileContent(): Boolean = true
 

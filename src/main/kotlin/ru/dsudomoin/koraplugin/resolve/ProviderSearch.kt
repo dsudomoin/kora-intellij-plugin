@@ -18,6 +18,7 @@ import org.jetbrains.uast.toUElement
 import ru.dsudomoin.koraplugin.KoraAnnotations
 import ru.dsudomoin.koraplugin.index.ProviderKind
 import ru.dsudomoin.koraplugin.index.getProviders
+import ru.dsudomoin.koraplugin.util.KoraAnnotationSearch
 
 data class KoraProvider(
     val element: PsiElement,
@@ -55,15 +56,12 @@ object ProviderSearch {
         val facade = JavaPsiFacade.getInstance(project)
         val result = mutableListOf<KoraProvider>()
 
-        for (annotationFqn in KoraAnnotations.COMPONENT_LIKE) {
-            val annotationClass = facade.findClass(annotationFqn, scope) ?: continue
-            AnnotatedElementsSearch.searchPsiClasses(annotationClass, scope).forEach { psiClass ->
-                val classType = facade.elementFactory.createType(psiClass)
-                val uClass = psiClass.toUElement() as? UClass ?: return@forEach
-                val tagInfo = TagExtractor.extractTags(uClass)
-                LOG.info("  Component-like: ${psiClass.qualifiedName} (type=${classType.canonicalText}, tags=$tagInfo)")
-                result.add(KoraProvider(psiClass, classType, tagInfo))
-            }
+        for (psiClass in KoraAnnotationSearch.findAnnotatedClasses(KoraAnnotations.COMPONENT_LIKE, project, scope)) {
+            val classType = facade.elementFactory.createType(psiClass)
+            val uClass = psiClass.toUElement() as? UClass ?: continue
+            val tagInfo = TagExtractor.extractTags(uClass)
+            LOG.info("  Component-like: ${psiClass.qualifiedName} (type=${classType.canonicalText}, tags=$tagInfo)")
+            result.add(KoraProvider(psiClass, classType, tagInfo))
         }
         return result
     }
