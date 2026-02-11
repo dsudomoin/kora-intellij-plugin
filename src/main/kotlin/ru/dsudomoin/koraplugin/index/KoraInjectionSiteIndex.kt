@@ -47,7 +47,7 @@ class KoraInjectionSiteIndex : FileBasedIndexExtension<String, List<InjectionSit
 
     override fun getName(): ID<String, List<InjectionSiteIndexEntry>> = NAME
 
-    override fun getVersion(): Int = 8
+    override fun getVersion(): Int = 9
 
     override fun dependsOnFileContent(): Boolean = true
 

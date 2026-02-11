@@ -3,7 +3,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21
 
 plugins {
     id("java")
-    id("org.jetbrains.kotlin.jvm") version "2.2.0"
+    id("org.jetbrains.kotlin.jvm") version "2.3.0"
     id("org.jetbrains.intellij.platform") version "2.10.4"
 }
 
@@ -25,7 +25,7 @@ repositories {
 // Read more: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin.html
 dependencies {
     intellijPlatform {
-        intellijIdea("2025.2")
+        intellijIdea("2025.3")
         testFramework(TestFrameworkType.Platform)
 
         bundledPlugin("com.intellij.java")
@@ -40,7 +40,7 @@ dependencies {
 intellijPlatform {
     pluginConfiguration {
         ideaVersion {
-            sinceBuild = "252"
+            sinceBuild = "253"
         }
 
         changeNotes = """
