@@ -5,7 +5,7 @@ import com.intellij.psi.PsiMethod
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import ru.dsudomoin.koraplugin.resolve.KoraProviderResolver
 
-class KoraGotoDeclarationHandlerTest : BasePlatformTestCase() {
+class KoraProviderResolverTest : BasePlatformTestCase() {
 
     override fun getTestDataPath(): String = "src/test/testData"
 
