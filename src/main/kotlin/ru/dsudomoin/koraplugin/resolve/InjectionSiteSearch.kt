@@ -1,6 +1,8 @@
 package ru.dsudomoin.koraplugin.resolve
 
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.diagnostic.debug
+import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.project.Project
 import com.intellij.psi.JavaPsiFacade
 import com.intellij.psi.PsiClass
@@ -18,7 +20,6 @@ import org.jetbrains.uast.UParameter
 import org.jetbrains.uast.toUElement
 import ru.dsudomoin.koraplugin.KoraAnnotations
 import ru.dsudomoin.koraplugin.index.KoraInjectionSiteIndex
-import ru.dsudomoin.koraplugin.util.KoraAnnotationSearch
 
 data class KoraInjectionSite(
     val element: PsiElement,
@@ -34,7 +35,11 @@ object InjectionSiteSearch {
     fun findAllInjectionSites(project: Project): List<KoraInjectionSite> {
         return CachedValuesManager.getManager(project).getCachedValue(project) {
             val result = doFindAllInjectionSites(project)
-            CachedValueProvider.Result.create(result, PsiModificationTracker.getInstance(project))
+            CachedValueProvider.Result.create(
+                result,
+                PsiModificationTracker.getInstance(project).forLanguage(com.intellij.lang.java.JavaLanguage.INSTANCE),
+                PsiModificationTracker.getInstance(project).forLanguage(org.jetbrains.kotlin.idea.KotlinLanguage.INSTANCE),
+            )
         }
     }
 
@@ -47,25 +52,33 @@ object InjectionSiteSearch {
 
         // 1. @Component class constructors
         val componentSites = findComponentConstructorSites(project, allScope, projectScope)
-        LOG.info("Found ${componentSites.size} @Component constructor injection sites")
+        LOG.debug { "Found ${componentSites.size} @Component constructor injection sites" }
         sites.addAll(componentSites)
 
         // 2. Factory method parameters in module classes
         val factorySites = findFactoryMethodParamSites(project, allScope, projectScope)
-        LOG.info("Found ${factorySites.size} factory method parameter injection sites")
+        LOG.debug { "Found ${factorySites.size} factory method parameter injection sites" }
         sites.addAll(factorySites)
 
         return sites
     }
 
     private fun findComponentConstructorSites(project: Project, allScope: GlobalSearchScope, projectScope: GlobalSearchScope): List<KoraInjectionSite> {
+        val facade = JavaPsiFacade.getInstance(project)
         val result = mutableListOf<KoraInjectionSite>()
+        val visited = mutableSetOf<String>()
 
-        for (psiClass in KoraAnnotationSearch.findAnnotatedClasses(KoraAnnotations.COMPONENT_LIKE, project, projectScope)) {
-            val uClass = psiClass.toUElement() as? UClass ?: continue
-            for (method in uClass.methods) {
-                if (!method.isConstructor) continue
-                collectParameterSites(method, result)
+        for (annotationFqn in KoraAnnotations.COMPONENT_LIKE) {
+            val annotationClass = facade.findClass(annotationFqn, allScope) ?: continue
+            AnnotatedElementsSearch.searchPsiClasses(annotationClass, projectScope).forEach { psiClass ->
+                ProgressManager.checkCanceled()
+                val qn = psiClass.qualifiedName ?: return@forEach
+                if (!visited.add(qn)) return@forEach
+                val uClass = psiClass.toUElement() as? UClass ?: return@forEach
+                for (method in uClass.methods) {
+                    if (!method.isConstructor) continue
+                    collectParameterSites(method, result)
+                }
             }
         }
         return result
@@ -85,6 +98,7 @@ object InjectionSiteSearch {
         for (annotationFqn in moduleAnnotations) {
             val annotationClass = facade.findClass(annotationFqn, allScope) ?: continue
             AnnotatedElementsSearch.searchPsiClasses(annotationClass, projectScope).forEach { psiClass ->
+                ProgressManager.checkCanceled()
                 collectModuleMethodParamsRecursive(psiClass, result, visited)
             }
         }
@@ -94,6 +108,7 @@ object InjectionSiteSearch {
         val generatedAnnotation = facade.findClass(KoraAnnotations.GENERATED, allScope)
         if (generatedAnnotation != null) {
             AnnotatedElementsSearch.searchPsiClasses(generatedAnnotation, projectScope).forEach { psiClass ->
+                ProgressManager.checkCanceled()
                 if (psiClass.isInterface) {
                     collectModuleMethodParamsRecursive(psiClass, result, visited)
                 }
@@ -171,8 +186,17 @@ object InjectionSiteSearch {
             result.add(KoraInjectionSite(nameElement, resolvedType, tagInfo, isAllOf))
         }
 
-        // Supplement: injection sites in unannotated module interfaces (not indexed)
-        supplementSitesFromUnannotatedModules(project, typeFqn, result, facade, allScope)
+        // Supplement from cached unannotated module sites (single pass, not per-typeFqn)
+        val unannotatedByType = getUnannotatedModuleSitesByType(project)
+        val supplement = unannotatedByType[typeFqn]
+        if (supplement != null) {
+            val existingElements = result.mapTo(HashSet()) { it.element }
+            for (site in supplement) {
+                if (site.element !in existingElements) {
+                    result.add(site)
+                }
+            }
+        }
 
         return result
     }
@@ -192,21 +216,28 @@ object InjectionSiteSearch {
     }
 
     /**
-     * For module classes that are NOT directly annotated but participate in the container,
-     * the FileBasedIndex misses their method parameters.
-     * Supplement index results with a targeted PSI lookup for these classes.
+     * Cached map: typeFqn → injection sites from unannotated module interfaces.
+     * Built once per modification, shared across all findInjectionSitesByType calls.
      */
-    private fun supplementSitesFromUnannotatedModules(
-        project: Project,
-        typeFqn: String,
-        result: MutableList<KoraInjectionSite>,
-        facade: JavaPsiFacade,
-        scope: GlobalSearchScope,
-    ) {
+    private fun getUnannotatedModuleSitesByType(project: Project): Map<String, List<KoraInjectionSite>> {
+        return CachedValuesManager.getManager(project).getCachedValue(project) {
+            val map = buildUnannotatedModuleSiteMap(project)
+            CachedValueProvider.Result.create(
+                map,
+                PsiModificationTracker.getInstance(project).forLanguage(com.intellij.lang.java.JavaLanguage.INSTANCE),
+                PsiModificationTracker.getInstance(project).forLanguage(org.jetbrains.kotlin.idea.KotlinLanguage.INSTANCE),
+            )
+        }
+    }
+
+    private fun buildUnannotatedModuleSiteMap(project: Project): Map<String, List<KoraInjectionSite>> {
+        val scope = GlobalSearchScope.allScope(project)
+        val facade = JavaPsiFacade.getInstance(project)
         val moduleClassFqns = KoraModuleRegistry.getModuleClassFqns(project)
-        val existingElements = result.mapTo(HashSet()) { it.element }
+        val result = mutableMapOf<String, MutableList<KoraInjectionSite>>()
 
         for (moduleFqn in moduleClassFqns) {
+            ProgressManager.checkCanceled()
             val psiClass = facade.findClass(moduleFqn, scope) ?: continue
             if (KoraModuleRegistry.isDirectlyAnnotatedModule(psiClass)) continue
 
@@ -221,16 +252,15 @@ object InjectionSiteSearch {
                         is com.intellij.psi.PsiParameter -> paramPsi.nameIdentifier ?: paramPsi
                         else -> paramPsi
                     }
-                    if (nameElement in existingElements) continue
-
                     val (resolvedType, isAllOf) = InjectionPointDetector.unwrapType(param.type)
                     val paramTypeFqn = com.intellij.psi.util.TypeConversionUtil.erasure(resolvedType).canonicalText
-                    if (paramTypeFqn == typeFqn) {
-                        val tagInfo = TagExtractor.extractTags(param)
-                        result.add(KoraInjectionSite(nameElement, resolvedType, tagInfo, isAllOf))
-                    }
+                    val tagInfo = TagExtractor.extractTags(param)
+                    result.getOrPut(paramTypeFqn) { mutableListOf() }
+                        .add(KoraInjectionSite(nameElement, resolvedType, tagInfo, isAllOf))
                 }
             }
         }
+
+        return result
     }
 }

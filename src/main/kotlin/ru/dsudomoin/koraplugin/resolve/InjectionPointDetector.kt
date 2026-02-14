@@ -1,7 +1,7 @@
 package ru.dsudomoin.koraplugin.resolve
 
 import com.intellij.openapi.diagnostic.Logger
-import com.intellij.psi.PsiClass
+import com.intellij.openapi.diagnostic.debug
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiType
 import org.jetbrains.uast.*
@@ -22,30 +22,30 @@ object InjectionPointDetector {
         // toUElement() returns null for leaf PSI elements like identifiers
         val uParameter = element.getUastParentOfType<UParameter>()
         if (uParameter == null) {
-            LOG.info("No UParameter found for element: ${element.text} (${element.javaClass.simpleName})")
+            LOG.debug { "No UParameter found for element: ${element.text} (${element.javaClass.simpleName})" }
             return null
         }
 
         val uMethod = uParameter.getParentOfType<UMethod>()
         if (uMethod == null) {
-            LOG.info("No UMethod found for parameter: ${uParameter.name}")
+            LOG.debug { "No UMethod found for parameter: ${uParameter.name}" }
             return null
         }
 
         // Skip lambda parameters — only handle direct method/constructor parameters
         if (uParameter !in uMethod.uastParameters) {
-            LOG.info("Parameter ${uParameter.name} is not a direct parameter of method ${uMethod.name} (likely lambda)")
+            LOG.debug { "Parameter ${uParameter.name} is not a direct parameter of method ${uMethod.name} (likely lambda)" }
             return null
         }
 
         val uClass = uMethod.getParentOfType<UClass>()
         if (uClass == null) {
-            LOG.info("No UClass found for method: ${uMethod.name}")
+            LOG.debug { "No UClass found for method: ${uMethod.name}" }
             return null
         }
 
         if (!isKoraInjectionContext(uMethod, uClass)) {
-            LOG.info("Not a Kora injection context: ${uClass.qualifiedName}.${uMethod.name}")
+            LOG.debug { "Not a Kora injection context: ${uClass.qualifiedName}.${uMethod.name}" }
             return null
         }
 
@@ -54,7 +54,7 @@ object InjectionPointDetector {
 
         val tagInfo = TagExtractor.extractTags(uParameter)
 
-        LOG.info("Detected injection point: type=${resolvedType.canonicalText}, tags=$tagInfo, allOf=$isAllOf")
+        LOG.debug { "Detected injection point: type=${resolvedType.canonicalText}, tags=$tagInfo, allOf=$isAllOf" }
         return InjectionPoint(resolvedType, tagInfo, isAllOf)
     }
 
@@ -81,19 +81,16 @@ object InjectionPointDetector {
     )
 
     private fun isKoraModuleClass(uClass: UClass): Boolean {
-        // Check the class itself
+        // Check the class itself (fast: annotation lookup on current class)
         if (hasAnyModuleAnnotation(uClass)) return true
         if (isKoraGenerated(uClass)) return true
 
+        // Check via cached module registry (O(1) HashSet lookup)
+        // Registry already includes unannotated modules found via extends-chains,
+        // so no need for expensive recursive super traversal.
         val psiClass = uClass.javaPsi
-
-        // Check all super interfaces transitively (for extends chains going UP)
-        if (hasAnyModuleAnnotationInSupers(psiClass, mutableSetOf())) return true
-
-        // Check via cached module registry (going DOWN — e.g., @KoraApp class inheriting this interface)
-        val moduleClassFqns = KoraModuleRegistry.getModuleClassFqns(psiClass.project)
         val fqn = psiClass.qualifiedName
-        if (fqn != null && fqn in moduleClassFqns) return true
+        if (fqn != null && fqn in KoraModuleRegistry.getModuleClassFqns(psiClass.project)) return true
 
         return false
     }
@@ -118,17 +115,6 @@ object InjectionPointDetector {
 
     private fun hasAnyModuleAnnotation(uClass: UClass): Boolean {
         return MODULE_ANNOTATIONS.any { hasAnnotation(uClass, it) }
-    }
-
-    private fun hasAnyModuleAnnotationInSupers(psiClass: PsiClass, visited: MutableSet<String>): Boolean {
-        for (superIface in psiClass.supers) {
-            val fqn = superIface.qualifiedName ?: continue
-            if (!visited.add(fqn)) continue
-            val superUClass = superIface.toUElement() as? UClass ?: continue
-            if (hasAnyModuleAnnotation(superUClass)) return true
-            if (hasAnyModuleAnnotationInSupers(superIface, visited)) return true
-        }
-        return false
     }
 
     private fun hasAnnotation(uClass: UClass, annotationFqn: String): Boolean {

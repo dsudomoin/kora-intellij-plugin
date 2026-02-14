@@ -1,7 +1,10 @@
 package ru.dsudomoin.koraplugin.config
 
 import com.intellij.codeInsight.navigation.actions.GotoDeclarationHandler
+import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.editor.Editor
+import com.intellij.openapi.progress.ProgressManager
+import com.intellij.openapi.project.DumbService
 import com.intellij.psi.PsiAnnotation
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiLiteralExpression
@@ -23,9 +26,11 @@ class AnnotationValueGotoHandler : GotoDeclarationHandler {
         editor: Editor?,
     ): Array<PsiElement>? {
         if (sourceElement == null) return null
-        if (!KoraLibraryUtil.hasKoraLibrary(sourceElement.project)) return null
+        val project = sourceElement.project
+        if (DumbService.isDumb(project)) return null
+        if (!KoraLibraryUtil.hasKoraLibrary(project)) return null
 
-        // Check we're inside a string literal
+        // Check we're inside a string literal (cheap PSI walk — OK on EDT)
         if (!isInsideStringLiteral(sourceElement)) return null
 
         // Walk up PSI tree to find the enclosing annotation
@@ -39,7 +44,18 @@ class AnnotationValueGotoHandler : GotoDeclarationHandler {
         val paths = KoraConfigAnnotationRegistry.resolveConfigPaths(uAnnotation)
         if (paths.isEmpty()) return null
 
-        val targets = paths.flatMap { findConfigKeyElements(sourceElement.project, it) }
+        // Heavy: FilenameIndex + PSI traversal → run off EDT
+        var targets: List<PsiElement> = emptyList()
+        ProgressManager.getInstance().runProcessWithProgressSynchronously(
+            {
+                targets = ReadAction.compute<List<PsiElement>, RuntimeException> {
+                    paths.flatMap { findConfigKeyElements(project, it) }
+                }
+            },
+            "Resolving config key...",
+            true,
+            project,
+        )
         return targets.toTypedArray().ifEmpty { null }
     }
 

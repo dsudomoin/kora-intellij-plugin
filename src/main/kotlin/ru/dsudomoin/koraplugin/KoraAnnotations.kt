@@ -39,4 +39,7 @@ object KoraAnnotations {
 
     // HTTP Client
     const val HTTP_CLIENT = "ru.tinkoff.kora.http.client.common.annotation.HttpClient"
+
+    /** Type FQN prefixes for which ClassInheritorsSearch is skipped (too many inheritors). */
+    val COMMON_TYPE_PREFIXES = arrayOf("java.", "javax.", "kotlin.", "kotlinx.")
 }

@@ -1,6 +1,8 @@
 package ru.dsudomoin.koraplugin.resolve
 
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.diagnostic.debug
+import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.project.Project
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiType
@@ -18,7 +20,6 @@ import org.jetbrains.uast.toUElement
 import ru.dsudomoin.koraplugin.KoraAnnotations
 import ru.dsudomoin.koraplugin.index.ProviderKind
 import ru.dsudomoin.koraplugin.index.getProviders
-import ru.dsudomoin.koraplugin.util.KoraAnnotationSearch
 
 data class KoraProvider(
     val element: PsiElement,
@@ -33,20 +34,27 @@ object ProviderSearch {
     fun findAllProviders(project: Project): List<KoraProvider> {
         return CachedValuesManager.getManager(project).getCachedValue(project) {
             val result = doFindAllProviders(project)
-            CachedValueProvider.Result.create(result, PsiModificationTracker.getInstance(project))
+            CachedValueProvider.Result.create(
+                result,
+                PsiModificationTracker.getInstance(project).forLanguage(com.intellij.lang.java.JavaLanguage.INSTANCE),
+                PsiModificationTracker.getInstance(project).forLanguage(org.jetbrains.kotlin.idea.KotlinLanguage.INSTANCE),
+            )
         }
     }
 
     private fun doFindAllProviders(project: Project): List<KoraProvider> {
-        val scope = GlobalSearchScope.allScope(project)
+        val allScope = GlobalSearchScope.allScope(project)
+        val projectScope = GlobalSearchScope.projectScope(project)
         val providers = mutableListOf<KoraProvider>()
 
-        val componentProviders = findComponentProviders(project, scope)
-        LOG.info("Found ${componentProviders.size} @Component providers")
+        // @Component classes are always in project sources → use projectScope
+        val componentProviders = findComponentProviders(project, projectScope)
+        LOG.debug { "Found ${componentProviders.size} @Component providers" }
         providers.addAll(componentProviders)
 
-        val factoryProviders = findFactoryMethodProviders(project, scope)
-        LOG.info("Found ${factoryProviders.size} factory method providers")
+        // Factory methods may be in @Generated interfaces → use allScope
+        val factoryProviders = findFactoryMethodProviders(project, allScope)
+        LOG.debug { "Found ${factoryProviders.size} factory method providers" }
         providers.addAll(factoryProviders)
 
         return providers
@@ -54,14 +62,22 @@ object ProviderSearch {
 
     private fun findComponentProviders(project: Project, scope: GlobalSearchScope): List<KoraProvider> {
         val facade = JavaPsiFacade.getInstance(project)
+        val allScope = GlobalSearchScope.allScope(project)
         val result = mutableListOf<KoraProvider>()
+        val visited = mutableSetOf<String>()
 
-        for (psiClass in KoraAnnotationSearch.findAnnotatedClasses(KoraAnnotations.COMPONENT_LIKE, project, scope)) {
-            val classType = facade.elementFactory.createType(psiClass)
-            val uClass = psiClass.toUElement() as? UClass ?: continue
-            val tagInfo = TagExtractor.extractTags(uClass)
-            LOG.info("  Component-like: ${psiClass.qualifiedName} (type=${classType.canonicalText}, tags=$tagInfo)")
-            result.add(KoraProvider(psiClass, classType, tagInfo))
+        for (annotationFqn in KoraAnnotations.COMPONENT_LIKE) {
+            val annotationClass = facade.findClass(annotationFqn, allScope) ?: continue
+            AnnotatedElementsSearch.searchPsiClasses(annotationClass, scope).forEach { psiClass ->
+                ProgressManager.checkCanceled()
+                val qn = psiClass.qualifiedName ?: return@forEach
+                if (!visited.add(qn)) return@forEach
+                val classType = facade.elementFactory.createType(psiClass)
+                val uClass = psiClass.toUElement() as? UClass ?: return@forEach
+                val tagInfo = TagExtractor.extractTags(uClass)
+                LOG.debug { "  Component-like: ${psiClass.qualifiedName} (type=${classType.canonicalText}, tags=$tagInfo)" }
+                result.add(KoraProvider(psiClass, classType, tagInfo))
+            }
         }
         return result
     }
@@ -80,11 +96,12 @@ object ProviderSearch {
         for (annotationFqn in moduleAnnotations) {
             val annotationClass = facade.findClass(annotationFqn, scope)
             if (annotationClass == null) {
-                LOG.info("Annotation $annotationFqn not found in scope")
+                LOG.debug { "Annotation $annotationFqn not found in scope" }
                 continue
             }
             AnnotatedElementsSearch.searchPsiClasses(annotationClass, scope).forEach { psiClass ->
-                LOG.info("  Module class: ${psiClass.qualifiedName} (annotation=$annotationFqn)")
+                ProgressManager.checkCanceled()
+                LOG.debug { "  Module class: ${psiClass.qualifiedName} (annotation=$annotationFqn)" }
                 collectFactoryMethodsRecursive(psiClass, result, visited)
             }
         }
@@ -95,8 +112,9 @@ object ProviderSearch {
         val generatedAnnotation = facade.findClass(KoraAnnotations.GENERATED, scope)
         if (generatedAnnotation != null) {
             AnnotatedElementsSearch.searchPsiClasses(generatedAnnotation, scope).forEach { psiClass ->
+                ProgressManager.checkCanceled()
                 if (psiClass.isInterface) {
-                    LOG.info("  Generated module interface: ${psiClass.qualifiedName}")
+                    LOG.debug { "  Generated module interface: ${psiClass.qualifiedName}" }
                     collectFactoryMethodsRecursive(psiClass, result, visited)
                 }
             }
@@ -119,7 +137,7 @@ object ProviderSearch {
 
             val uMethod = method.toUElement() as? UMethod ?: continue
             val tagInfo = TagExtractor.extractTags(uMethod)
-            LOG.info("    Factory method: ${psiClass.qualifiedName}.${method.name} -> ${returnType.canonicalText} (tags=$tagInfo)")
+            LOG.debug { "    Factory method: ${psiClass.qualifiedName}.${method.name} -> ${returnType.canonicalText} (tags=$tagInfo)" }
             result.add(KoraProvider(method, returnType, tagInfo))
         }
 
@@ -162,8 +180,17 @@ object ProviderSearch {
             }
         }
 
-        // Supplement: factory methods in unannotated module interfaces (not indexed)
-        supplementProvidersFromUnannotatedModules(project, typeFqn, result, facade, scope)
+        // Supplement from cached unannotated module providers (single pass, not per-typeFqn)
+        val unannotatedByType = getUnannotatedModuleProvidersByType(project)
+        val supplement = unannotatedByType[typeFqn]
+        if (supplement != null) {
+            val existingElements = result.mapTo(HashSet()) { it.element }
+            for (provider in supplement) {
+                if (provider.element !in existingElements) {
+                    result.add(provider)
+                }
+            }
+        }
 
         return result
     }
@@ -183,35 +210,42 @@ object ProviderSearch {
     }
 
     /**
-     * For module classes that are NOT directly annotated (@Module/@KoraApp/etc.) but participate
-     * in the container via extends/implements chain, the FileBasedIndex misses their factory methods.
-     * Supplement index results with a targeted PSI lookup for these classes.
+     * Cached map: typeFqn → providers from unannotated module interfaces.
+     * Built once per modification, shared across all findProvidersByType calls.
      */
-    private fun supplementProvidersFromUnannotatedModules(
-        project: Project,
-        typeFqn: String,
-        result: MutableList<KoraProvider>,
-        facade: JavaPsiFacade,
-        scope: GlobalSearchScope,
-    ) {
+    private fun getUnannotatedModuleProvidersByType(project: Project): Map<String, List<KoraProvider>> {
+        return CachedValuesManager.getManager(project).getCachedValue(project) {
+            val map = buildUnannotatedModuleProviderMap(project)
+            CachedValueProvider.Result.create(
+                map,
+                PsiModificationTracker.getInstance(project).forLanguage(com.intellij.lang.java.JavaLanguage.INSTANCE),
+                PsiModificationTracker.getInstance(project).forLanguage(org.jetbrains.kotlin.idea.KotlinLanguage.INSTANCE),
+            )
+        }
+    }
+
+    private fun buildUnannotatedModuleProviderMap(project: Project): Map<String, List<KoraProvider>> {
+        val scope = GlobalSearchScope.allScope(project)
+        val facade = JavaPsiFacade.getInstance(project)
         val moduleClassFqns = KoraModuleRegistry.getModuleClassFqns(project)
-        val existingElements = result.mapTo(HashSet()) { it.element }
+        val result = mutableMapOf<String, MutableList<KoraProvider>>()
 
         for (moduleFqn in moduleClassFqns) {
+            ProgressManager.checkCanceled()
             val psiClass = facade.findClass(moduleFqn, scope) ?: continue
             if (KoraModuleRegistry.isDirectlyAnnotatedModule(psiClass)) continue
 
             for (method in psiClass.methods) {
-                if (method in existingElements) continue
                 val returnType = method.returnType ?: continue
                 if (returnType == PsiTypes.voidType()) continue
                 val returnFqn = com.intellij.psi.util.TypeConversionUtil.erasure(returnType).canonicalText
-                if (returnFqn == typeFqn) {
-                    val uMethod = method.toUElement() as? UMethod ?: continue
-                    val tagInfo = TagExtractor.extractTags(uMethod)
-                    result.add(KoraProvider(method, returnType, tagInfo))
-                }
+                val uMethod = method.toUElement() as? UMethod ?: continue
+                val tagInfo = TagExtractor.extractTags(uMethod)
+                result.getOrPut(returnFqn) { mutableListOf() }
+                    .add(KoraProvider(method, returnType, tagInfo))
             }
         }
+
+        return result
     }
 }

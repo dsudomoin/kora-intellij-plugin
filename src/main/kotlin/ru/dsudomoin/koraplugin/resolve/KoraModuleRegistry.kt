@@ -1,6 +1,8 @@
 package ru.dsudomoin.koraplugin.resolve
 
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.diagnostic.debug
+import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.project.Project
 import com.intellij.psi.JavaPsiFacade
 import com.intellij.psi.PsiClass
@@ -43,7 +45,11 @@ object KoraModuleRegistry {
     fun getModuleClassFqns(project: Project): Set<String> {
         return CachedValuesManager.getManager(project).getCachedValue(project) {
             val fqns = collectAllModuleClassFqns(project)
-            CachedValueProvider.Result.create(fqns, PsiModificationTracker.getInstance(project))
+            CachedValueProvider.Result.create(
+                fqns,
+                PsiModificationTracker.getInstance(project).forLanguage(com.intellij.lang.java.JavaLanguage.INSTANCE),
+                PsiModificationTracker.getInstance(project).forLanguage(org.jetbrains.kotlin.idea.KotlinLanguage.INSTANCE),
+            )
         }
     }
 
@@ -67,11 +73,12 @@ object KoraModuleRegistry {
         for (annotationFqn in MODULE_ANNOTATIONS) {
             val annotationClass = facade.findClass(annotationFqn, scope)
             if (annotationClass == null) {
-                LOG.info("Annotation class not found: $annotationFqn")
+                LOG.debug { "Annotation class not found: $annotationFqn" }
                 continue
             }
             AnnotatedElementsSearch.searchPsiClasses(annotationClass, scope).forEach { psiClass ->
-                LOG.info("Found @${annotationFqn.substringAfterLast('.')}: ${psiClass.qualifiedName}")
+                ProgressManager.checkCanceled()
+                LOG.debug { "Found @${annotationFqn.substringAfterLast('.')}: ${psiClass.qualifiedName}" }
                 addClassAndSupersFqns(psiClass, result)
             }
         }
@@ -80,15 +87,16 @@ object KoraModuleRegistry {
         val generatedAnnotation = facade.findClass(KoraAnnotations.GENERATED, scope)
         if (generatedAnnotation != null) {
             AnnotatedElementsSearch.searchPsiClasses(generatedAnnotation, scope).forEach { psiClass ->
+                ProgressManager.checkCanceled()
                 val uClass = psiClass.toUElement() as? UClass ?: return@forEach
                 if (isKoraGenerated(uClass)) {
-                    LOG.info("Found @Generated Kora submodule: ${psiClass.qualifiedName}")
+                    LOG.debug { "Found @Generated Kora submodule: ${psiClass.qualifiedName}" }
                     addClassAndSupersFqns(psiClass, result)
                 }
             }
         }
 
-        LOG.info("Module registry: ${result.size} FQNs collected: $result")
+        LOG.debug { "Module registry: ${result.size} FQNs collected: $result" }
         return result
     }
 

@@ -213,10 +213,13 @@ object ConfigPathResolver {
         return annotation.findAttributeValue("value")?.evaluate() as? String
     }
 
+    private val CAMEL_REGEX = Regex("([a-z0-9])([A-Z])")
+    private val KEBAB_REGEX = Regex("-([a-z])")
+
     /** camelCase → kebab-case: "hubItems" → "hub-items" */
     fun camelToKebab(name: String): String {
         if (!name.any { it.isUpperCase() }) return name
-        return name.replace(Regex("([a-z0-9])([A-Z])")) {
+        return name.replace(CAMEL_REGEX) {
             "${it.groupValues[1]}-${it.groupValues[2].lowercase()}"
         }
     }
@@ -224,7 +227,7 @@ object ConfigPathResolver {
     /** kebab-case → camelCase: "hub-items" → "hubItems" */
     fun kebabToCamel(name: String): String {
         if ('-' !in name) return name
-        return name.replace(Regex("-([a-z])")) {
+        return name.replace(KEBAB_REGEX) {
             it.groupValues[1].uppercase()
         }
     }
