@@ -28,15 +28,23 @@ class KoraUnknownConfigKeyInspection : LocalInspectionTool() {
         val project = holder.project
 
         // Skip well-known Kora framework prefixes (may not have @ConfigSource)
-        if (KNOWN_KORA_PREFIXES.any { fullPath == it || fullPath.startsWith("$it.") }) return
+        if (KNOWN_KORA_PREFIXES.any { prefix ->
+            fullPath == prefix ||
+                fullPath.length > prefix.length && fullPath[prefix.length] == '.' && fullPath.startsWith(prefix)
+        }) return
 
-        // Check if path matches any @ConfigSource
+        // Check if path matches any @ConfigSource (zero-alloc comparisons)
         val configSources = ConfigSourceSearch.findAllConfigSources(project)
-        if (configSources.any { fullPath == it.path || fullPath.startsWith("${it.path}.") || it.path.startsWith("$fullPath.") }) return
+        if (configSources.any { entry ->
+            val ep = entry.path
+            fullPath == ep ||
+                fullPath.length > ep.length && fullPath[ep.length] == '.' && fullPath.startsWith(ep) ||
+                ep.length > fullPath.length && ep[fullPath.length] == '.' && ep.startsWith(fullPath)
+        }) return
 
         // Check if path matches any annotation-mapped config
-        for (mapping in KoraConfigAnnotationRegistry.allAnnotationFqns) {
-            val m = KoraConfigAnnotationRegistry.findMappingForAnnotation(mapping) ?: continue
+        for (fqn in KoraConfigAnnotationRegistry.allAnnotationFqns) {
+            val m = KoraConfigAnnotationRegistry.findMappingForAnnotation(fqn) ?: continue
             if (m.configPathPrefix != null && (fullPath.startsWith(m.configPathPrefix) || m.configPathPrefix.startsWith(fullPath))) return
         }
 

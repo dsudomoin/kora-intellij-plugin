@@ -37,7 +37,8 @@ class KoraMissingProviderInspection : LocalInspectionTool() {
         // All<T> allows empty collection — skip
         if (injectionPoint.isAllOf) return
 
-        val providers = KoraProviderResolver.resolve(nameIdentifier)
+        // Pass pre-computed InjectionPoint to avoid redundant detect() inside resolve()
+        val providers = KoraProviderResolver.resolve(injectionPoint, holder.project)
         if (providers.isEmpty()) {
             val typeText = injectionPoint.requiredType.presentableText
             holder.registerProblem(

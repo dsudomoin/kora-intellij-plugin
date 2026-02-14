@@ -7,6 +7,7 @@ import com.intellij.codeInsight.navigation.PsiTargetNavigator
 import com.intellij.codeInsight.navigation.openFileWithPsiElement
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.editor.markup.GutterIconRenderer
+import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.project.Project
@@ -36,24 +37,36 @@ import java.awt.event.MouseEvent
 
 class ConfigSourceLineMarkerProvider : LineMarkerProvider, DumbAware {
 
-    override fun getLineMarkerInfo(element: PsiElement): LineMarkerInfo<*>? {
-        val project = element.project
-        if (DumbService.isDumb(project)) return null
-        if (!KoraLibraryUtil.hasKoraLibrary(project)) return null
-        if (!isConfigMemberIdentifier(element)) return null
+    override fun getLineMarkerInfo(element: PsiElement): LineMarkerInfo<*>? = null
 
-        val uClass = findContainingConfigClass(element) ?: return null
-        if (!isInConfigSourceClass(uClass)) return null
+    override fun collectSlowLineMarkers(
+        elements: MutableList<out PsiElement>,
+        result: MutableCollection<in LineMarkerInfo<*>>,
+    ) {
+        val first = elements.firstOrNull() ?: return
+        val project = first.project
+        if (DumbService.isDumb(project)) return
+        if (!KoraLibraryUtil.hasKoraLibrary(project)) return
 
-        return LineMarkerInfo(
-            element,
-            element.textRange,
-            AllIcons.FileTypes.Config,
-            { "Navigate to config key" },
-            ConfigGutterNavigationHandler(),
-            GutterIconRenderer.Alignment.LEFT,
-            { "Navigate to config key" },
-        )
+        for (element in elements) {
+            ProgressManager.checkCanceled()
+            if (!isConfigMemberIdentifier(element)) continue
+
+            val uClass = findContainingConfigClass(element) ?: continue
+            if (!isInConfigSourceClass(uClass)) continue
+
+            result.add(
+                LineMarkerInfo(
+                    element,
+                    element.textRange,
+                    AllIcons.FileTypes.Config,
+                    { "Navigate to config key" },
+                    ConfigGutterNavigationHandler(),
+                    GutterIconRenderer.Alignment.LEFT,
+                    { "Navigate to config key" },
+                )
+            )
+        }
     }
 
     private fun isConfigMemberIdentifier(element: PsiElement): Boolean {
@@ -96,8 +109,12 @@ class ConfigSourceLineMarkerProvider : LineMarkerProvider, DumbAware {
     }
 
     private fun isReferencedFromConfigSource(uClass: UClass): Boolean {
-        // Check if this class is used as a return type (directly, or as List/Set/Map element)
-        // by any method in a @ConfigSource class
+        // Quick check: is this class's FQN used as a return type in any @ConfigSource class?
+        val fqn = uClass.qualifiedName ?: return false
+        val referencedFqns = ConfigSourceSearch.getReferencedTypeFqns(uClass.javaPsi.project)
+        if (fqn !in referencedFqns) return false
+
+        // Confirmed referenced — verify full path resolution
         return ConfigPathResolver.resolveMemberToConfigPath(
             uClass.javaPsi.methods.firstOrNull()?.name ?: return false,
             uClass.javaPsi
@@ -106,14 +123,30 @@ class ConfigSourceLineMarkerProvider : LineMarkerProvider, DumbAware {
 
     private class ConfigGutterNavigationHandler : GutterIconNavigationHandler<PsiElement> {
         override fun navigate(e: MouseEvent, elt: PsiElement) {
-            val configPath = resolveConfigPath(elt) ?: return
+            val project = elt.project
+            var configPath: String? = null
+            var targets: List<PsiElement> = emptyList()
 
-            val targets = findConfigKeyElements(elt.project, configPath)
+            ProgressManager.getInstance().runProcessWithProgressSynchronously(
+                {
+                    com.intellij.openapi.application.ReadAction.compute<Unit, RuntimeException> {
+                        configPath = resolveConfigPath(elt)
+                        if (configPath != null) {
+                            targets = findConfigKeyElements(project, configPath!!)
+                        }
+                    }
+                },
+                "Resolving config key...",
+                true,
+                project,
+            )
+
+            val path = configPath ?: return
             when (targets.size) {
                 0 -> {
                     JBPopupFactory.getInstance()
                         .createHtmlTextBalloonBuilder(
-                            "Config key not found: <b>$configPath</b>",
+                            "Config key not found: <b>$path</b>",
                             MessageType.WARNING,
                             null,
                         )
@@ -121,7 +154,7 @@ class ConfigSourceLineMarkerProvider : LineMarkerProvider, DumbAware {
                         .show(RelativePoint(e), Balloon.Position.above)
                 }
                 1 -> openFileWithPsiElement(targets.single(), true, true)
-                else -> PsiTargetNavigator(targets).navigate(e, "Choose Config Key", elt.project)
+                else -> PsiTargetNavigator(targets).navigate(e, "Choose Config Key", project)
             }
         }
 
@@ -141,15 +174,18 @@ class ConfigSourceLineMarkerProvider : LineMarkerProvider, DumbAware {
 
 }
 
+private val CONFIG_FILE_EXTENSIONS = listOf("yaml", "yml", "conf")
+
 fun findConfigKeyElements(project: Project, configPath: String): List<PsiElement> {
     val targets = mutableListOf<PsiElement>()
     val scope = GlobalSearchScope.projectScope(project)
     val psiManager = PsiManager.getInstance(project)
 
-    val configFileExtensions = listOf("yaml", "yml", "conf")
+    val configFileExtensions = CONFIG_FILE_EXTENSIONS
     for (ext in configFileExtensions) {
         val files = FilenameIndex.getAllFilesByExt(project, ext, scope)
         for (vf in files) {
+            ProgressManager.checkCanceled()
             val psiFile = psiManager.findFile(vf) ?: continue
             when {
                 psiFile is YAMLFile -> targets.addAll(findYamlKeysByPath(psiFile, configPath))
@@ -196,18 +232,27 @@ private fun findYamlKeysInMapping(
 }
 
 private fun findHoconKeysByPath(psiFile: PsiElement, configPath: String): List<PsiElement> {
-    return try {
-        findHoconKeysByPathImpl(psiFile, configPath)
-    } catch (_: ClassNotFoundException) {
-        emptyList()
-    } catch (_: NoClassDefFoundError) {
-        emptyList()
+    val reflection = HoconReflectionCache.instance ?: return emptyList()
+    return findHoconKeysByPathImpl(psiFile, configPath, reflection)
+}
+
+private data class HoconReflection(val hKeyClass: Class<*>, val fullPathTextMethod: java.lang.reflect.Method)
+
+private object HoconReflectionCache {
+    // Lazy: avoids ExceptionInInitializerError loop when HOCON plugin is not installed.
+    // Returns null if HOCON classes are unavailable.
+    val instance: HoconReflection? by lazy {
+        try {
+            val cls = Class.forName("org.jetbrains.plugins.hocon.psi.HKey")
+            HoconReflection(cls, cls.getMethod("fullPathText"))
+        } catch (_: ClassNotFoundException) { null }
+        catch (_: NoClassDefFoundError) { null }
     }
 }
 
-private fun findHoconKeysByPathImpl(psiFile: PsiElement, configPath: String): List<PsiElement> {
-    val hKeyClass = Class.forName("org.jetbrains.plugins.hocon.psi.HKey")
-    val fullPathTextMethod = hKeyClass.getMethod("fullPathText")
+private fun findHoconKeysByPathImpl(psiFile: PsiElement, configPath: String, reflection: HoconReflection): List<PsiElement> {
+    val hKeyClass = reflection.hKeyClass
+    val fullPathTextMethod = reflection.fullPathTextMethod
     val patternSegments = configPath.split(".")
 
     val allKeys = mutableListOf<PsiElement>()
@@ -216,6 +261,7 @@ private fun findHoconKeysByPathImpl(psiFile: PsiElement, configPath: String): Li
     // Pass 1: exact fullPathText matching
     val results = mutableListOf<PsiElement>()
     for (key in allKeys) {
+        ProgressManager.checkCanceled()
         val fullPath = hoconKeyFullPath(key, fullPathTextMethod) ?: continue
         if (matchesWildcardPath(fullPath, patternSegments)) {
             results.add(key)
@@ -226,12 +272,14 @@ private fun findHoconKeysByPathImpl(psiFile: PsiElement, configPath: String): Li
     // Pass 2: fallback for keys inside list elements (fullPathText doesn't include list parent path)
     // Try splitting the path: prefix matches a key whose value is a list, suffix matches keys inside elements
     for (splitAt in patternSegments.size - 1 downTo 1) {
-        val prefixPath = patternSegments.subList(0, splitAt).joinToString(".")
-        val suffixPath = patternSegments.subList(splitAt, patternSegments.size).joinToString(".")
+        // Normalize once per split, not per key
+        val prefixNorm = normalizePath(patternSegments.subList(0, splitAt).joinToString("."))
+        val suffixNorm = normalizePath(patternSegments.subList(splitAt, patternSegments.size).joinToString("."))
 
         for (key in allKeys) {
+            ProgressManager.checkCanceled()
             val fullPath = hoconKeyFullPath(key, fullPathTextMethod) ?: continue
-            if (!normalizedEquals(fullPath, prefixPath)) continue
+            if (normalizePath(fullPath) != prefixNorm) continue
 
             // Found the prefix key — search its descendants for keys matching the suffix
             val field = key.parent ?: continue
@@ -241,7 +289,7 @@ private fun findHoconKeysByPathImpl(psiFile: PsiElement, configPath: String): Li
             for (dk in descendantKeys) {
                 if (dk === key) continue
                 val dkPath = hoconKeyFullPath(dk, fullPathTextMethod) ?: continue
-                if (normalizedEquals(dkPath, suffixPath)) {
+                if (normalizePath(dkPath) == suffixNorm) {
                     results.add(dk)
                 }
             }
@@ -252,12 +300,28 @@ private fun findHoconKeysByPathImpl(psiFile: PsiElement, configPath: String): Li
     return results
 }
 
+private data class ScalaOptionMethods(
+    val isDefined: java.lang.reflect.Method,
+    val get: java.lang.reflect.Method,
+)
+
+/** Thread-safe lazy cache for Scala Option reflection methods. */
+private object ScalaOptionReflectionCache {
+    // ConcurrentHashMap: class → methods. Handles different Option subclasses (Some, None).
+    private val cache = java.util.concurrent.ConcurrentHashMap<Class<*>, ScalaOptionMethods>()
+
+    fun get(optionInstance: Any): ScalaOptionMethods {
+        return cache.computeIfAbsent(optionInstance.javaClass) { cls ->
+            ScalaOptionMethods(cls.getMethod("isDefined"), cls.getMethod("get"))
+        }
+    }
+}
+
 private fun hoconKeyFullPath(key: PsiElement, fullPathTextMethod: java.lang.reflect.Method): String? {
     val optionResult = fullPathTextMethod.invoke(key)
-    val isDefinedMethod = optionResult.javaClass.getMethod("isDefined")
-    if (isDefinedMethod.invoke(optionResult) != true) return null
-    val getMethod = optionResult.javaClass.getMethod("get")
-    return getMethod.invoke(optionResult) as? String
+    val methods = ScalaOptionReflectionCache.get(optionResult)
+    if (methods.isDefined.invoke(optionResult) != true) return null
+    return methods.get.invoke(optionResult) as? String
 }
 
 private fun matchesWildcardPath(fullPath: String, patternSegments: List<String>): Boolean {
@@ -268,14 +332,12 @@ private fun matchesWildcardPath(fullPath: String, patternSegments: List<String>)
     }
 }
 
-/** Compares two dot-separated paths normalizing camelCase ↔ kebab-case */
-private fun normalizedEquals(a: String, b: String): Boolean {
-    val aNorm = a.split(".").joinToString(".") { ConfigPathResolver.camelToKebab(it) }
-    val bNorm = b.split(".").joinToString(".") { ConfigPathResolver.camelToKebab(it) }
-    return aNorm == bNorm
-}
+/** Normalizes a dot-separated path: camelCase → kebab-case for each segment */
+private fun normalizePath(path: String): String =
+    path.split(".").joinToString(".") { ConfigPathResolver.camelToKebab(it) }
 
 private fun collectElements(element: PsiElement, targetClass: Class<*>, result: MutableList<PsiElement>) {
+    ProgressManager.checkCanceled()
     if (targetClass.isInstance(element)) {
         result.add(element)
     }

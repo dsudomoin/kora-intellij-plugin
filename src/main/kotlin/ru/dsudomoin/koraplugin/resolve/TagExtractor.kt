@@ -26,6 +26,8 @@ object TagExtractor {
         var isAny = false
         for (annotation in element.uAnnotations) {
             val annotationFqn = annotation.qualifiedName ?: continue
+            // Skip well-known non-Kora annotations to avoid expensive resolve()
+            if (isKnownNonKoraAnnotation(annotationFqn)) continue
             val annotationClass = annotation.resolve() ?: continue
             val metaTag = annotationClass.getAnnotation(KoraAnnotations.TAG) ?: continue
             val metaUAnnotation = metaTag.toUElement() as? UAnnotation ?: continue
@@ -68,6 +70,18 @@ object TagExtractor {
         }
 
         return TagInfo(tags, isAny)
+    }
+
+    private val NON_KORA_PREFIXES = arrayOf(
+        "java.", "javax.", "jakarta.",
+        "kotlin.", "kotlinx.",
+        "org.jetbrains.annotations.",
+        "org.intellij.",
+        "org.springframework.",
+    )
+
+    private fun isKnownNonKoraAnnotation(fqn: String): Boolean {
+        return NON_KORA_PREFIXES.any { fqn.startsWith(it) }
     }
 
     private fun collectClassLiterals(expr: UExpression, result: MutableList<UClassLiteralExpression>) {

@@ -1,7 +1,10 @@
 package ru.dsudomoin.koraplugin.config.yaml
 
 import com.intellij.codeInsight.navigation.actions.GotoDeclarationHandler
+import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.editor.Editor
+import com.intellij.openapi.progress.ProgressManager
+import com.intellij.openapi.project.DumbService
 import com.intellij.psi.PsiElement
 import com.intellij.psi.util.PsiTreeUtil
 import org.jetbrains.yaml.psi.YAMLKeyValue
@@ -17,7 +20,9 @@ class YamlConfigGotoHandler : GotoDeclarationHandler {
         editor: Editor?,
     ): Array<PsiElement>? {
         if (sourceElement == null) return null
-        if (!KoraLibraryUtil.hasKoraLibrary(sourceElement.project)) return null
+        val project = sourceElement.project
+        if (DumbService.isDumb(project)) return null
+        if (!KoraLibraryUtil.hasKoraLibrary(project)) return null
 
         val keyValue = PsiTreeUtil.getParentOfType(sourceElement, YAMLKeyValue::class.java) ?: return null
         // Only trigger on the key part, not the value
@@ -26,13 +31,25 @@ class YamlConfigGotoHandler : GotoDeclarationHandler {
 
         val fullPath = buildYamlKeyPath(keyValue) ?: return null
 
-        val configSourceTarget = ConfigPathResolver.resolveConfigKeyToMethod(sourceElement.project, fullPath)
-        if (configSourceTarget != null) return arrayOf(configSourceTarget)
+        // Heavy: AnnotatedElementsSearch + ConfigSource scan → run off EDT
+        var targets: Array<PsiElement>? = null
+        ProgressManager.getInstance().runProcessWithProgressSynchronously(
+            {
+                targets = ReadAction.compute<Array<PsiElement>?, RuntimeException> {
+                    val configSourceTarget = ConfigPathResolver.resolveConfigKeyToMethod(project, fullPath)
+                    if (configSourceTarget != null) return@compute arrayOf(configSourceTarget)
 
-        val annotationTargets = KoraConfigAnnotationRegistry.findAnnotatedElements(sourceElement.project, fullPath)
-        if (annotationTargets.isNotEmpty()) return annotationTargets.toTypedArray()
+                    val annotationTargets = KoraConfigAnnotationRegistry.findAnnotatedElements(project, fullPath)
+                    if (annotationTargets.isNotEmpty()) return@compute annotationTargets.toTypedArray()
 
-        return null
+                    null
+                }
+            },
+            "Resolving config key...",
+            true,
+            project,
+        )
+        return targets
     }
 
 }

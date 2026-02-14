@@ -223,7 +223,10 @@ class KoraLineMarkerProvider : LineMarkerProvider, DumbAware {
         val firstOnLine = sameLineParams.minByOrNull { it.sourcePsi?.textOffset ?: Int.MAX_VALUE }
         if (uParameter != firstOnLine) return null
 
-        return createLineMarkerInfo(element, INJECTION_TOOLTIP, MultiParamNavigationHandler(sameLineParams))
+        val paramInfos = sameLineParams.map { ParamInfo(it.name, it.type.presentableText) }
+        val classFqn = uClass.qualifiedName ?: return null
+        val methodName = if (uMethod.isConstructor) null else uMethod.name
+        return createLineMarkerInfo(element, INJECTION_TOOLTIP, MultiParamNavigationHandler(paramInfos, classFqn, methodName))
     }
 
     private fun getMethodNameIdentifier(uMethod: UMethod): PsiElement? {
@@ -413,17 +416,37 @@ class KoraLineMarkerProvider : LineMarkerProvider, DumbAware {
 
     private class SingleParamNavigationHandler : GutterIconNavigationHandler<PsiElement> {
         override fun navigate(e: MouseEvent, elt: PsiElement) {
-            val targets = KoraProviderResolver.resolve(elt).distinct()
-            navigateToElements(e, elt.project, targets, "Choose Kora DI Provider", "No providers found")
+            val project = elt.project
+            var targets: List<PsiElement> = emptyList()
+            ProgressManager.getInstance().runProcessWithProgressSynchronously(
+                {
+                    targets = ReadAction.compute<List<PsiElement>, RuntimeException> {
+                        KoraProviderResolver.resolve(elt).distinct()
+                    }
+                },
+                "Searching for Kora DI providers...",
+                true,
+                project,
+            )
+            navigateToElements(e, project, targets, "Choose Kora DI Provider", "No providers found")
         }
     }
 
+    /**
+     * Stores param info as Strings to avoid holding UParameter references
+     * past PSI modification (prevents PsiInvalidElementAccessException).
+     */
+    private data class ParamInfo(val name: String, val typeText: String)
+
     private class MultiParamNavigationHandler(
-        private val params: List<UParameter>,
+        private val paramInfos: List<ParamInfo>,
+        private val classFqn: String,
+        private val methodName: String?,
     ) : GutterIconNavigationHandler<PsiElement> {
         override fun navigate(e: MouseEvent, elt: PsiElement) {
+            val project = elt.project
             JBPopupFactory.getInstance()
-                .createPopupChooserBuilder(params)
+                .createPopupChooserBuilder(paramInfos)
                 .setTitle("Choose Parameter")
                 .setRenderer(object : javax.swing.DefaultListCellRenderer() {
                     override fun getListCellRendererComponent(
@@ -434,23 +457,43 @@ class KoraLineMarkerProvider : LineMarkerProvider, DumbAware {
                         cellHasFocus: Boolean,
                     ): java.awt.Component {
                         super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus)
-                        if (value is UParameter) {
-                            text = "${value.name}: ${value.type.presentableText}"
+                        if (value is ParamInfo) {
+                            text = "${value.name}: ${value.typeText}"
                         }
                         return this
                     }
                 })
-                .setItemChosenCallback { param ->
-                    val psi = param.sourcePsi ?: return@setItemChosenCallback
-                    val nameElement = when (psi) {
-                        is com.intellij.psi.PsiParameter -> psi.nameIdentifier ?: psi
-                        else -> psi
-                    }
-                    val targets = KoraProviderResolver.resolve(nameElement).distinct()
-                    navigateToElements(e, elt.project, targets, "Choose Kora DI Provider", "No providers found")
+                .setItemChosenCallback { paramInfo ->
+                    var targets: List<PsiElement> = emptyList()
+                    ProgressManager.getInstance().runProcessWithProgressSynchronously(
+                        {
+                            targets = ReadAction.compute<List<PsiElement>, RuntimeException> {
+                                // Re-lookup PSI fresh to avoid stale references
+                                val nameElement = findParamElement(project, classFqn, methodName, paramInfo.name)
+                                    ?: return@compute emptyList()
+                                KoraProviderResolver.resolve(nameElement).distinct()
+                            }
+                        },
+                        "Searching for Kora DI providers...",
+                        true,
+                        project,
+                    )
+                    navigateToElements(e, project, targets, "Choose Kora DI Provider", "No providers found")
                 }
                 .createPopup()
                 .show(RelativePoint(e))
+        }
+
+        private fun findParamElement(project: Project, classFqn: String, methodName: String?, paramName: String): PsiElement? {
+            val psiClass = com.intellij.psi.JavaPsiFacade.getInstance(project)
+                .findClass(classFqn, com.intellij.psi.search.GlobalSearchScope.allScope(project)) ?: return null
+            val method = if (methodName != null) {
+                psiClass.findMethodsByName(methodName, false).firstOrNull()
+            } else {
+                psiClass.constructors.firstOrNull()
+            } ?: return null
+            val param = method.parameterList.parameters.find { it.name == paramName } ?: return null
+            return param.nameIdentifier ?: param
         }
     }
 }
