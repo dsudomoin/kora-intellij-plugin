@@ -13,6 +13,9 @@ import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.popup.JBPopupFactory
+import com.intellij.openapi.ui.popup.ListSeparator
+import com.intellij.openapi.ui.popup.PopupStep
+import com.intellij.openapi.ui.popup.util.BaseListPopupStep
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiMethod
 import com.intellij.psi.PsiTypes
@@ -503,6 +506,7 @@ private data class InjectionSiteTarget(
     val paramName: String,
     val containingClassName: String,
     val methodSignature: String,
+    val isGenerated: Boolean,
 )
 
 private fun buildInjectionSiteTargets(elements: List<PsiElement>): List<InjectionSiteTarget> {
@@ -522,8 +526,10 @@ private fun buildInjectionSiteTargets(elements: List<PsiElement>): List<Injectio
         val methodDisplayName = if (uMethod.isConstructor) className else uMethod.name
         val methodSignature = "$className.$methodDisplayName"
 
-        InjectionSiteTarget(element, paramName, className, methodSignature)
-    }
+        val isGenerated = uClass.javaPsi.hasAnnotation(KoraAnnotations.GENERATED)
+
+        InjectionSiteTarget(element, paramName, className, methodSignature, isGenerated)
+    }.sortedBy { it.isGenerated } // non-generated first (false < true)
 }
 
 private class InjectionSiteRenderer : ColoredListCellRenderer<InjectionSiteTarget>() {
@@ -557,14 +563,45 @@ private fun navigateToInjectionSites(
         }
         1 -> navigateToElement(targets.single().element)
         else -> {
-            JBPopupFactory.getInstance()
-                .createPopupChooserBuilder(targets)
-                .setTitle(title)
-                .setRenderer(InjectionSiteRenderer())
-                .setNamerForFiltering { it.paramName }
-                .setItemChosenCallback { navigateToElement(it.element) }
-                .createPopup()
-                .show(RelativePoint(e))
+            val hasGenerated = targets.any { it.isGenerated }
+            if (hasGenerated) {
+                val step = object : BaseListPopupStep<InjectionSiteTarget>(title, targets) {
+                    override fun getTextFor(value: InjectionSiteTarget): String {
+                        return "${value.paramName}  (${value.methodSignature})"
+                    }
+
+                    override fun getIconFor(value: InjectionSiteTarget): Icon {
+                        return AllIcons.Nodes.Parameter
+                    }
+
+                    override fun getSeparatorAbove(value: InjectionSiteTarget): ListSeparator? {
+                        val index = values.indexOf(value)
+                        if (index <= 0) return null
+                        val prev = values[index - 1]
+                        if (!prev.isGenerated && value.isGenerated) {
+                            return ListSeparator("Generated")
+                        }
+                        return null
+                    }
+
+                    override fun onChosen(selectedValue: InjectionSiteTarget, finalChoice: Boolean): PopupStep<*>? {
+                        if (finalChoice) {
+                            navigateToElement(selectedValue.element)
+                        }
+                        return FINAL_CHOICE
+                    }
+                }
+                JBPopupFactory.getInstance().createListPopup(step).show(RelativePoint(e))
+            } else {
+                JBPopupFactory.getInstance()
+                    .createPopupChooserBuilder(targets)
+                    .setTitle(title)
+                    .setRenderer(InjectionSiteRenderer())
+                    .setNamerForFiltering { it.paramName }
+                    .setItemChosenCallback { navigateToElement(it.element) }
+                    .createPopup()
+                    .show(RelativePoint(e))
+            }
         }
     }
 }

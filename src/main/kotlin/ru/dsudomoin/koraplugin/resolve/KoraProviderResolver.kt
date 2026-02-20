@@ -6,6 +6,7 @@ import com.intellij.openapi.progress.ProgressManager
 import com.intellij.psi.PsiClassType
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiMethod
+import com.intellij.psi.PsiType
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.psi.search.searches.ClassInheritorsSearch
 import ru.dsudomoin.koraplugin.KoraAnnotations
@@ -36,7 +37,11 @@ object KoraProviderResolver {
             if (element is PsiMethod) methods.add(element) else others.add(element)
         }
         LOG.debug { "Resolve: ${methods.size} methods + ${others.size} others (required: ${injectionPoint.requiredType.canonicalText})" }
-        return methods.ifEmpty { others }
+        val result = methods.ifEmpty { others }
+        if (result.isNotEmpty()) return result
+
+        // Fallback: annotation-generated providers (e.g., @ConfigValueExtractor on class)
+        return findAnnotationGeneratedProviders(injectionPoint.requiredType, injectionPoint.tagInfo, project)
     }
 
     /**
@@ -55,7 +60,7 @@ object KoraProviderResolver {
         // 2. Find subtypes and query index for each (skip for common JDK/Kotlin types)
         val subtypeProviders = mutableListOf<KoraProvider>()
         if (requiredClass != null && !isCommonType(rawFqn)) {
-            val scope = GlobalSearchScope.allScope(project)
+            val scope = GlobalSearchScope.projectScope(project)
             ClassInheritorsSearch.search(requiredClass, scope, true).forEach { inheritor ->
                 ProgressManager.checkCanceled()
                 val inheritorFqn = inheritor.qualifiedName ?: return@forEach
@@ -70,6 +75,46 @@ object KoraProviderResolver {
 
     private fun isCommonType(fqn: String): Boolean {
         return COMMON_TYPE_PREFIXES.any { fqn.startsWith(it) }
+    }
+
+    /**
+     * Fallback for annotation-generated providers.
+     * E.g., @ConfigValueExtractor on class Foo → generates ConfigValueExtractor<Foo>.
+     */
+    fun findAnnotationGeneratedProviders(requiredType: PsiType, tagInfo: TagInfo, project: com.intellij.openapi.project.Project): List<PsiElement> {
+        if (requiredType !is PsiClassType) return emptyList()
+        // Generated extractors have no tags
+        if (tagInfo.tagFqns.isNotEmpty() && !tagInfo.isTagAny) return emptyList()
+
+        val requiredClass = requiredType.resolve() ?: return emptyList()
+        val requiredFqn = requiredClass.qualifiedName ?: return emptyList()
+
+        val typeArgs = requiredType.parameters
+        if (typeArgs.size != 1 || typeArgs[0] !is PsiClassType) return emptyList()
+        val targetClass = (typeArgs[0] as PsiClassType).resolve() ?: return emptyList()
+
+        return when (requiredFqn) {
+            KoraAnnotations.CONFIG_VALUE_EXTRACTOR_TYPE -> {
+                if (targetClass.hasAnnotation(KoraAnnotations.CONFIG_VALUE_EXTRACTOR_ANNOTATION) ||
+                    targetClass.hasAnnotation(KoraAnnotations.CONFIG_SOURCE)
+                ) listOf(targetClass) else emptyList()
+            }
+            // @Json generates both JsonReader<T> and JsonWriter<T>
+            // @JsonReader generates only JsonReader<T>
+            KoraAnnotations.JSON_READER_TYPE -> {
+                if (targetClass.hasAnnotation(KoraAnnotations.JSON) ||
+                    targetClass.hasAnnotation(KoraAnnotations.JSON_READER_ANNOTATION)
+                ) listOf(targetClass) else emptyList()
+            }
+            // @Json generates both JsonReader<T> and JsonWriter<T>
+            // @JsonWriter generates only JsonWriter<T>
+            KoraAnnotations.JSON_WRITER_TYPE -> {
+                if (targetClass.hasAnnotation(KoraAnnotations.JSON) ||
+                    targetClass.hasAnnotation(KoraAnnotations.JSON_WRITER_ANNOTATION)
+                ) listOf(targetClass) else emptyList()
+            }
+            else -> emptyList()
+        }
     }
 
     private fun resolveViaFullScan(injectionPoint: InjectionPoint, project: com.intellij.openapi.project.Project): List<KoraProvider> {
