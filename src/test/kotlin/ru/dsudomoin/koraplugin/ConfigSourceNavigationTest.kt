@@ -247,4 +247,122 @@ class ConfigSourceNavigationTest : BasePlatformTestCase() {
         val path = ConfigPathResolver.resolveMethodToConfigPath(method)
         assertEquals("auth.session.timeToAuth", path)
     }
+
+    // --- Kotlin interface tests ---
+
+    fun `test resolveConfigKeyToMethod with Kotlin interface fun methods`() {
+        configureAnnotations()
+
+        myFixture.addFileToProject(
+            "HubConfig.kt",
+            """
+            import ru.tinkoff.kora.config.common.annotation.ConfigSource
+
+            @ConfigSource("hub")
+            interface HubConfig {
+                fun spawn(): Spawn
+                fun protection(): Protection
+            }
+
+            interface Spawn {
+                fun location(): String
+            }
+
+            interface Protection {
+                fun enabled(): Boolean
+            }
+            """.trimIndent(),
+        )
+
+        myFixture.configureByText("Dummy.java", "class Dummy {}")
+
+        val entries = ConfigSourceSearch.findAllConfigSources(project)
+        assertEquals("Should find Kotlin @ConfigSource interface", 1, entries.size)
+        assertEquals("hub", entries[0].path)
+
+        val spawn = ConfigPathResolver.resolveConfigKeyToMethod(project, "hub.spawn")
+        assertNotNull("Should resolve hub.spawn in Kotlin interface", spawn)
+        assertTrue("Expected PsiMethod", spawn is PsiMethod)
+
+        val location = ConfigPathResolver.resolveConfigKeyToMethod(project, "hub.spawn.location")
+        assertNotNull("Should resolve hub.spawn.location through Kotlin interface", location)
+        assertTrue("Expected PsiMethod", location is PsiMethod)
+    }
+
+    fun `test resolveConfigKeyToMethod with Kotlin interface val properties`() {
+        configureAnnotations()
+
+        myFixture.addFileToProject(
+            "AppConfig.kt",
+            """
+            import ru.tinkoff.kora.config.common.annotation.ConfigSource
+
+            @ConfigSource("app")
+            interface AppConfig {
+                val serverName: String
+                val maxRetries: Int
+            }
+            """.trimIndent(),
+        )
+
+        myFixture.configureByText("Dummy.java", "class Dummy {}")
+
+        val serverName = ConfigPathResolver.resolveConfigKeyToMethod(project, "app.serverName")
+        assertNotNull("Should resolve app.serverName (Kotlin val getter)", serverName)
+
+        val maxRetries = ConfigPathResolver.resolveConfigKeyToMethod(project, "app.maxRetries")
+        assertNotNull("Should resolve app.maxRetries (Kotlin val getter)", maxRetries)
+    }
+
+    fun `test resolveConfigKeyToMethod with kebab-case on Kotlin interface`() {
+        configureAnnotations()
+
+        myFixture.addFileToProject(
+            "ServerConfig.kt",
+            """
+            import ru.tinkoff.kora.config.common.annotation.ConfigSource
+
+            @ConfigSource("server")
+            interface ServerConfig {
+                fun maxConnections(): Int
+                val readTimeout: Long
+            }
+            """.trimIndent(),
+        )
+
+        myFixture.configureByText("Dummy.java", "class Dummy {}")
+
+        val funKebab = ConfigPathResolver.resolveConfigKeyToMethod(project, "server.max-connections")
+        assertNotNull("Should resolve kebab-case for fun method", funKebab)
+
+        val valKebab = ConfigPathResolver.resolveConfigKeyToMethod(project, "server.read-timeout")
+        assertNotNull("Should resolve kebab-case for val property", valKebab)
+    }
+
+    fun `test resolveMethodToConfigPath for Kotlin val getter`() {
+        configureAnnotations()
+
+        myFixture.addFileToProject(
+            "AppConfig.kt",
+            """
+            import ru.tinkoff.kora.config.common.annotation.ConfigSource
+
+            @ConfigSource("app")
+            interface AppConfig {
+                val serverName: String
+            }
+            """.trimIndent(),
+        )
+
+        myFixture.configureByText("Dummy.java", "class Dummy {}")
+
+        val appConfig = findClass("AppConfig")
+        // Kotlin val → getter method getServerName()
+        val getter = appConfig.findMethodsByName("getServerName", false).firstOrNull()
+            ?: appConfig.findMethodsByName("serverName", false).firstOrNull()
+        assertNotNull("Should find getter method for val property", getter)
+
+        val path = ConfigPathResolver.resolveMethodToConfigPath(getter!!)
+        assertEquals("app.serverName", path)
+    }
 }
