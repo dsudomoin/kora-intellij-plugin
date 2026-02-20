@@ -2,7 +2,9 @@ package ru.dsudomoin.koraplugin
 
 import com.intellij.psi.PsiClass
 import com.intellij.psi.PsiMethod
+import com.intellij.psi.PsiParameter
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
+import ru.dsudomoin.koraplugin.resolve.KoraBeanNavigator
 import ru.dsudomoin.koraplugin.resolve.KoraProviderResolver
 
 class KoraProviderResolverTest : BasePlatformTestCase() {
@@ -442,6 +444,243 @@ class KoraProviderResolverTest : BasePlatformTestCase() {
         assertTrue(
             "Expected to navigate to MyServiceImpl @Component class",
             targets.any { it is PsiClass && it.name == "MyServiceImpl" },
+        )
+    }
+
+    fun `test Json annotation generates JsonReader provider`() {
+        configureAnnotations()
+        myFixture.configureByFiles(
+            "ru/tinkoff/kora/json/common/annotation/Json.java",
+            "ru/tinkoff/kora/json/common/JsonReader.java",
+        )
+
+        myFixture.addFileToProject(
+            "TelegramUserData.java",
+            """
+            import ru.tinkoff.kora.json.common.annotation.Json;
+
+            @Json
+            public class TelegramUserData {
+                public long telegramId;
+                public String firstName;
+            }
+            """.trimIndent(),
+        )
+
+        myFixture.configureByText(
+            "AuthorizePlayerOperation.java",
+            """
+            import ru.tinkoff.kora.common.Component;
+            import ru.tinkoff.kora.json.common.JsonReader;
+
+            @Component
+            public class AuthorizePlayerOperation {
+                public AuthorizePlayerOperation(JsonReader<TelegramUserData> telegram<caret>Reader) {}
+            }
+            """.trimIndent(),
+        )
+
+        val element = myFixture.file.findElementAt(myFixture.caretOffset)!!
+        val targets = KoraProviderResolver.resolve(element)
+
+        assertNotEmpty(targets)
+        assertTrue(
+            "Expected to navigate to @Json-annotated TelegramUserData class",
+            targets.any { it is PsiClass && it.name == "TelegramUserData" },
+        )
+    }
+
+    fun `test Json annotation generates JsonWriter provider`() {
+        configureAnnotations()
+        myFixture.configureByFiles(
+            "ru/tinkoff/kora/json/common/annotation/Json.java",
+            "ru/tinkoff/kora/json/common/JsonWriter.java",
+        )
+
+        myFixture.addFileToProject(
+            "TelegramUserData.java",
+            """
+            import ru.tinkoff.kora.json.common.annotation.Json;
+
+            @Json
+            public class TelegramUserData {
+                public long telegramId;
+            }
+            """.trimIndent(),
+        )
+
+        myFixture.configureByText(
+            "MySerializer.java",
+            """
+            import ru.tinkoff.kora.common.Component;
+            import ru.tinkoff.kora.json.common.JsonWriter;
+
+            @Component
+            public class MySerializer {
+                public MySerializer(JsonWriter<TelegramUserData> telegram<caret>Writer) {}
+            }
+            """.trimIndent(),
+        )
+
+        val element = myFixture.file.findElementAt(myFixture.caretOffset)!!
+        val targets = KoraProviderResolver.resolve(element)
+
+        assertNotEmpty(targets)
+        assertTrue(
+            "Expected to navigate to @Json-annotated TelegramUserData class",
+            targets.any { it is PsiClass && it.name == "TelegramUserData" },
+        )
+    }
+
+    fun `test JsonReader annotation generates only JsonReader provider`() {
+        configureAnnotations()
+        myFixture.configureByFiles(
+            "ru/tinkoff/kora/json/common/annotation/JsonReader.java",
+            "ru/tinkoff/kora/json/common/JsonReader.java",
+        )
+
+        myFixture.addFileToProject(
+            "MyData.java",
+            """
+            import ru.tinkoff.kora.json.common.annotation.JsonReader;
+
+            @JsonReader
+            public class MyData {
+                public String value;
+            }
+            """.trimIndent(),
+        )
+
+        myFixture.configureByText(
+            "MyConsumer.java",
+            """
+            import ru.tinkoff.kora.common.Component;
+            import ru.tinkoff.kora.json.common.JsonReader;
+
+            @Component
+            public class MyConsumer {
+                public MyConsumer(JsonReader<MyData> data<caret>Reader) {}
+            }
+            """.trimIndent(),
+        )
+
+        val element = myFixture.file.findElementAt(myFixture.caretOffset)!!
+        val targets = KoraProviderResolver.resolve(element)
+
+        assertNotEmpty(targets)
+        assertTrue(
+            "Expected to navigate to @JsonReader-annotated MyData class",
+            targets.any { it is PsiClass && it.name == "MyData" },
+        )
+    }
+
+    fun `test JsonWriter annotation generates only JsonWriter provider`() {
+        configureAnnotations()
+        myFixture.configureByFiles(
+            "ru/tinkoff/kora/json/common/annotation/JsonWriter.java",
+            "ru/tinkoff/kora/json/common/JsonWriter.java",
+        )
+
+        myFixture.addFileToProject(
+            "MyData.java",
+            """
+            import ru.tinkoff.kora.json.common.annotation.JsonWriter;
+
+            @JsonWriter
+            public class MyData {
+                public String value;
+            }
+            """.trimIndent(),
+        )
+
+        myFixture.configureByText(
+            "MyConsumer.java",
+            """
+            import ru.tinkoff.kora.common.Component;
+            import ru.tinkoff.kora.json.common.JsonWriter;
+
+            @Component
+            public class MyConsumer {
+                public MyConsumer(JsonWriter<MyData> data<caret>Writer) {}
+            }
+            """.trimIndent(),
+        )
+
+        val element = myFixture.file.findElementAt(myFixture.caretOffset)!!
+        val targets = KoraProviderResolver.resolve(element)
+
+        assertNotEmpty(targets)
+        assertTrue(
+            "Expected to navigate to @JsonWriter-annotated MyData class",
+            targets.any { it is PsiClass && it.name == "MyData" },
+        )
+    }
+
+    fun `test generic factory method finds concrete injection sites`() {
+        configureAnnotations()
+
+        myFixture.addFileToProject(
+            "JsonReader.java",
+            """
+            public interface JsonReader<T> {
+                T read(String value);
+            }
+            """.trimIndent(),
+        )
+
+        myFixture.addFileToProject(
+            "JdbcResultColumnMapper.java",
+            """
+            public interface JdbcResultColumnMapper<T> {
+                T map(Object rs, int index);
+            }
+            """.trimIndent(),
+        )
+
+        myFixture.addFileToProject(
+            "RaceSlot.java",
+            """
+            public class RaceSlot {}
+            """.trimIndent(),
+        )
+
+        myFixture.addFileToProject(
+            "JdbcMappersModule.java",
+            """
+            import ru.tinkoff.kora.common.Module;
+
+            @Module
+            public interface JdbcMappersModule {
+                default <T> JdbcResultColumnMapper<T> jsonReaderColumnMapper(JsonReader<T> reader) {
+                    return null;
+                }
+            }
+            """.trimIndent(),
+        )
+
+        myFixture.configureByText(
+            "RaceSlotRepository.java",
+            """
+            import ru.tinkoff.kora.common.Component;
+
+            @Component
+            public class RaceSlotRepository {
+                public RaceSlotRepository(JdbcResultColumnMapper<RaceSlot> raceSlotMapper) {}
+            }
+            """.trimIndent(),
+        )
+
+        val usages = KoraBeanNavigator.resolveFactoryMethodUsages(
+            project, "JdbcMappersModule", "jsonReaderColumnMapper",
+        )
+
+        assertNotEmpty(usages)
+        assertTrue(
+            "Expected to find injection site for JdbcResultColumnMapper<RaceSlot>",
+            usages.any {
+                val parent = it.parent
+                parent is PsiParameter && parent.name == "raceSlotMapper"
+            },
         )
     }
 

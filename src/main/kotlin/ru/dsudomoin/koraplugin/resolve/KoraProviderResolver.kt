@@ -60,7 +60,7 @@ object KoraProviderResolver {
         // 2. Find subtypes and query index for each (skip for common JDK/Kotlin types)
         val subtypeProviders = mutableListOf<KoraProvider>()
         if (requiredClass != null && !isCommonType(rawFqn)) {
-            val scope = GlobalSearchScope.allScope(project)
+            val scope = GlobalSearchScope.projectScope(project)
             ClassInheritorsSearch.search(requiredClass, scope, true).forEach { inheritor ->
                 ProgressManager.checkCanceled()
                 val inheritorFqn = inheritor.qualifiedName ?: return@forEach
@@ -89,19 +89,32 @@ object KoraProviderResolver {
         val requiredClass = requiredType.resolve() ?: return emptyList()
         val requiredFqn = requiredClass.qualifiedName ?: return emptyList()
 
-        if (requiredFqn == KoraAnnotations.CONFIG_VALUE_EXTRACTOR_TYPE) {
-            val typeArgs = requiredType.parameters
-            if (typeArgs.size == 1 && typeArgs[0] is PsiClassType) {
-                val targetClass = (typeArgs[0] as PsiClassType).resolve() ?: return emptyList()
+        val typeArgs = requiredType.parameters
+        if (typeArgs.size != 1 || typeArgs[0] !is PsiClassType) return emptyList()
+        val targetClass = (typeArgs[0] as PsiClassType).resolve() ?: return emptyList()
+
+        return when (requiredFqn) {
+            KoraAnnotations.CONFIG_VALUE_EXTRACTOR_TYPE -> {
                 if (targetClass.hasAnnotation(KoraAnnotations.CONFIG_VALUE_EXTRACTOR_ANNOTATION) ||
                     targetClass.hasAnnotation(KoraAnnotations.CONFIG_SOURCE)
-                ) {
-                    return listOf(targetClass)
-                }
+                ) listOf(targetClass) else emptyList()
             }
+            // @Json generates both JsonReader<T> and JsonWriter<T>
+            // @JsonReader generates only JsonReader<T>
+            KoraAnnotations.JSON_READER_TYPE -> {
+                if (targetClass.hasAnnotation(KoraAnnotations.JSON) ||
+                    targetClass.hasAnnotation(KoraAnnotations.JSON_READER_ANNOTATION)
+                ) listOf(targetClass) else emptyList()
+            }
+            // @Json generates both JsonReader<T> and JsonWriter<T>
+            // @JsonWriter generates only JsonWriter<T>
+            KoraAnnotations.JSON_WRITER_TYPE -> {
+                if (targetClass.hasAnnotation(KoraAnnotations.JSON) ||
+                    targetClass.hasAnnotation(KoraAnnotations.JSON_WRITER_ANNOTATION)
+                ) listOf(targetClass) else emptyList()
+            }
+            else -> emptyList()
         }
-
-        return emptyList()
     }
 
     private fun resolveViaFullScan(injectionPoint: InjectionPoint, project: com.intellij.openapi.project.Project): List<KoraProvider> {
