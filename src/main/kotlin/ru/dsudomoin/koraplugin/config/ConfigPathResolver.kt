@@ -51,9 +51,9 @@ object ConfigPathResolver {
             val segment = segments[i]
             val altSegment = if ('-' in segment) kebabToCamel(segment) else camelToKebab(segment)
 
-            // Try method first (interfaces, records), then field (data classes)
-            val method = currentClass.findMethodsByName(segment, true).firstOrNull()
-                ?: currentClass.findMethodsByName(altSegment, true).firstOrNull()
+            // Try method first (interfaces, records), then Kotlin val getter, then field (data classes)
+            val method = findMethodOrGetter(currentClass, segment)
+                ?: findMethodOrGetter(currentClass, altSegment)
             val returnType: PsiType?
             if (method != null) {
                 lastElement = method
@@ -112,7 +112,7 @@ object ConfigPathResolver {
      * Map<K, V> members produce a "*" wildcard segment in the path.
      */
     fun resolveMemberToConfigPath(memberName: String, containingClass: PsiClass): String? {
-        val segments = mutableListOf(memberName)
+        val segments = mutableListOf(stripGetterPrefix(memberName))
         var currentClass = containingClass
 
         // Walk up through enclosing classes until we find one with @ConfigSource
@@ -165,7 +165,7 @@ object ConfigPathResolver {
                 || resolveMapValueClass(returnType) == targetClass
                 || resolveCollectionElementClass(returnType) == targetClass
             ) {
-                return m.name to returnType
+                return stripGetterPrefix(m.name) to returnType
             }
         }
         for (f in inClass.fields) {
@@ -211,6 +211,21 @@ object ConfigPathResolver {
             it.qualifiedName == KoraAnnotations.CONFIG_SOURCE
         } ?: return null
         return annotation.findAttributeValue("value")?.evaluate() as? String
+    }
+
+    /** Finds a method by direct name or Kotlin val getter name (get + capitalize). */
+    private fun findMethodOrGetter(psiClass: PsiClass, name: String): PsiMethod? {
+        psiClass.findMethodsByName(name, true).firstOrNull()?.let { return it }
+        val getterName = "get${name.replaceFirstChar { it.uppercase() }}"
+        return psiClass.findMethodsByName(getterName, true).firstOrNull()
+    }
+
+    /** Strips Kotlin getter prefix: "getSomeProperty" → "someProperty". Returns name as-is if no prefix. */
+    private fun stripGetterPrefix(methodName: String): String {
+        if (methodName.length > 3 && methodName.startsWith("get") && methodName[3].isUpperCase()) {
+            return methodName[3].lowercase() + methodName.substring(4)
+        }
+        return methodName
     }
 
     private val CAMEL_REGEX = Regex("([a-z0-9])([A-Z])")
