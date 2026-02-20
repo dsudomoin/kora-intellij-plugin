@@ -6,6 +6,7 @@ import com.intellij.openapi.progress.ProgressManager
 import com.intellij.psi.PsiClassType
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiMethod
+import com.intellij.psi.PsiType
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.psi.search.searches.ClassInheritorsSearch
 import ru.dsudomoin.koraplugin.KoraAnnotations
@@ -36,7 +37,11 @@ object KoraProviderResolver {
             if (element is PsiMethod) methods.add(element) else others.add(element)
         }
         LOG.debug { "Resolve: ${methods.size} methods + ${others.size} others (required: ${injectionPoint.requiredType.canonicalText})" }
-        return methods.ifEmpty { others }
+        val result = methods.ifEmpty { others }
+        if (result.isNotEmpty()) return result
+
+        // Fallback: annotation-generated providers (e.g., @ConfigValueExtractor on class)
+        return findAnnotationGeneratedProviders(injectionPoint.requiredType, injectionPoint.tagInfo, project)
     }
 
     /**
@@ -70,6 +75,33 @@ object KoraProviderResolver {
 
     private fun isCommonType(fqn: String): Boolean {
         return COMMON_TYPE_PREFIXES.any { fqn.startsWith(it) }
+    }
+
+    /**
+     * Fallback for annotation-generated providers.
+     * E.g., @ConfigValueExtractor on class Foo → generates ConfigValueExtractor<Foo>.
+     */
+    fun findAnnotationGeneratedProviders(requiredType: PsiType, tagInfo: TagInfo, project: com.intellij.openapi.project.Project): List<PsiElement> {
+        if (requiredType !is PsiClassType) return emptyList()
+        // Generated extractors have no tags
+        if (tagInfo.tagFqns.isNotEmpty() && !tagInfo.isTagAny) return emptyList()
+
+        val requiredClass = requiredType.resolve() ?: return emptyList()
+        val requiredFqn = requiredClass.qualifiedName ?: return emptyList()
+
+        if (requiredFqn == KoraAnnotations.CONFIG_VALUE_EXTRACTOR_TYPE) {
+            val typeArgs = requiredType.parameters
+            if (typeArgs.size == 1 && typeArgs[0] is PsiClassType) {
+                val targetClass = (typeArgs[0] as PsiClassType).resolve() ?: return emptyList()
+                if (targetClass.hasAnnotation(KoraAnnotations.CONFIG_VALUE_EXTRACTOR_ANNOTATION) ||
+                    targetClass.hasAnnotation(KoraAnnotations.CONFIG_SOURCE)
+                ) {
+                    return listOf(targetClass)
+                }
+            }
+        }
+
+        return emptyList()
     }
 
     private fun resolveViaFullScan(injectionPoint: InjectionPoint, project: com.intellij.openapi.project.Project): List<KoraProvider> {

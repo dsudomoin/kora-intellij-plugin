@@ -3,6 +3,7 @@ package ru.dsudomoin.koraplugin.resolve
 import com.intellij.psi.PsiClassType
 import com.intellij.psi.PsiType
 import com.intellij.psi.PsiTypeParameter
+import com.intellij.psi.util.TypeConversionUtil
 
 object KoraTypeMatching {
 
@@ -10,30 +11,76 @@ object KoraTypeMatching {
      * Checks if [providedType] is assignable to [requiredType], including generic type argument matching.
      */
     fun isTypeAssignable(requiredType: PsiType, providedType: PsiType): Boolean {
-        if (requiredType.isAssignableFrom(providedType)) return true
-
+        // For PsiClassType: always do our own generic-aware check
+        // (isAssignableFrom uses erasure and ignores type arguments for subclasses)
         if (requiredType is PsiClassType && providedType is PsiClassType) {
-            val requiredClass = requiredType.resolve() ?: return false
-            val providedClass = providedType.resolve() ?: return false
+            val reqClass = requiredType.resolve()
+            val provClass = providedType.resolve()
 
-            if (requiredClass != providedClass && !providedClass.isInheritor(requiredClass, true)) return false
+            // If we can't resolve, fall back to IntelliJ's check
+            if (reqClass == null || provClass == null) {
+                return requiredType.isAssignableFrom(providedType)
+            }
 
-            if (requiredClass == providedClass) {
-                val reqArgs = requiredType.parameters
-                val provArgs = providedType.parameters
-                if (reqArgs.isNotEmpty() && provArgs.isNotEmpty() && reqArgs.size == provArgs.size) {
-                    return reqArgs.zip(provArgs).all { (r, p) ->
-                        if (p is PsiClassType && p.resolve() is PsiTypeParameter) return@all true
-                        if (r is PsiClassType && r.resolve() is PsiTypeParameter) return@all true
-                        isTypeAssignable(r, p)
-                    }
+            // Same class: compare type arguments
+            if (reqClass == provClass) {
+                return areTypeArgsCompatible(requiredType.parameters, providedType.parameters)
+            }
+
+            // Subclass relationship
+            if (!provClass.isInheritor(reqClass, true)) return false
+
+            val reqArgs = requiredType.parameters
+            if (reqArgs.isEmpty()) return true // Raw required type → any subclass matches
+
+            // Check generics via supertype substitution
+            val derivedResult = providedType.resolveGenerics()
+            if (derivedResult.element != null) {
+                val substitutor = TypeConversionUtil.getSuperClassSubstitutor(
+                    reqClass, derivedResult.element!!, derivedResult.substitutor
+                )
+                return reqClass.typeParameters.withIndex().all { (i, tp) ->
+                    val substituted = substitutor.substitute(tp) ?: return@all true
+                    if (i >= reqArgs.size) return@all true
+                    isTypeArgCompatible(reqArgs[i], substituted)
                 }
             }
 
-            return true
+            return true // Can't determine → accept
         }
 
-        return false
+        // Non-class types (primitives, arrays, wildcards): delegate to IntelliJ
+        return requiredType.isAssignableFrom(providedType)
+    }
+
+    /**
+     * Checks if type arguments are compatible (same-class case).
+     * If one or both sides are raw (no args), accept.
+     */
+    private fun areTypeArgsCompatible(reqArgs: Array<PsiType>, provArgs: Array<PsiType>): Boolean {
+        if (reqArgs.isEmpty() || provArgs.isEmpty()) return true
+        if (reqArgs.size != provArgs.size) return true
+        return reqArgs.zip(provArgs).all { (r, p) -> isTypeArgCompatible(r, p) }
+    }
+
+    /**
+     * Checks if a provided type argument is compatible with a required type argument.
+     * For type parameters (e.g., T extends Enum<T>), checks that required satisfies bounds.
+     */
+    private fun isTypeArgCompatible(required: PsiType, provided: PsiType): Boolean {
+        // Provided is a type parameter (e.g., factory returns Foo<T>): check bounds
+        if (provided is PsiClassType) {
+            val resolved = provided.resolve()
+            if (resolved is PsiTypeParameter) {
+                val bounds = resolved.extendsListTypes
+                if (bounds.isEmpty()) return true
+                // Required must satisfy all bounds of T (i.e., required <: bound)
+                return bounds.all { bound -> isTypeAssignable(bound, required) }
+            }
+        }
+        // Required is a type parameter (injection site has unresolved generic): accept
+        if (required is PsiClassType && required.resolve() is PsiTypeParameter) return true
+        return isTypeAssignable(required, provided)
     }
 
     /**
@@ -68,7 +115,11 @@ object KoraTypeMatching {
         if (type1 is PsiClassType && type2 is PsiClassType) {
             val class1 = type1.resolve()
             val class2 = type2.resolve()
-            return class1 != null && class1 == class2
+            if (class1 == null || class1 != class2) return false
+            val args1 = type1.parameters
+            val args2 = type2.parameters
+            if (args1.size != args2.size) return false
+            return args1.zip(args2).all { (a, b) -> isTypeEqual(a, b) }
         }
         return false
     }

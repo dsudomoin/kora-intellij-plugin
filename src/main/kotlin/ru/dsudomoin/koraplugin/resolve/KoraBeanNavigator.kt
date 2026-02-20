@@ -149,8 +149,13 @@ object KoraBeanNavigator {
             val methods = matching.filterIsInstance<PsiMethod>()
             val targets = methods.ifEmpty { matching }
 
-            if (targets.isNotEmpty()) {
-                result.add(ParamProviders(name, param.type.presentableText, targets))
+            // Fallback: annotation-generated providers (e.g., @ConfigValueExtractor)
+            val finalTargets = targets.ifEmpty {
+                KoraProviderResolver.findAnnotationGeneratedProviders(resolvedType, tagInfo, project)
+            }
+
+            if (finalTargets.isNotEmpty()) {
+                result.add(ParamProviders(name, param.type.presentableText, finalTargets))
             }
         }
 

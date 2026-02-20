@@ -16,6 +16,8 @@ object KoraAnnotations {
     const val VALUE_OF_TYPE = "ru.tinkoff.kora.application.graph.ValueOf"
     const val GENERATED = "ru.tinkoff.kora.common.annotation.Generated"
     const val CONFIG_SOURCE = "ru.tinkoff.kora.config.common.annotation.ConfigSource"
+    const val CONFIG_VALUE_EXTRACTOR_ANNOTATION = "ru.tinkoff.kora.config.common.annotation.ConfigValueExtractor"
+    const val CONFIG_VALUE_EXTRACTOR_TYPE = "ru.tinkoff.kora.config.common.extractor.ConfigValueExtractor"
 
     // Kafka
     const val KAFKA_LISTENER = "ru.tinkoff.kora.kafka.common.annotation.KafkaListener"
