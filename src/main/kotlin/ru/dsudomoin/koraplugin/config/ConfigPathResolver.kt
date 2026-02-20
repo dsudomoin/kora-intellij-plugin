@@ -1,5 +1,6 @@
 package ru.dsudomoin.koraplugin.config
 
+import com.intellij.codeInsight.AnnotationUtil
 import com.intellij.openapi.project.Project
 import com.intellij.psi.PsiClass
 import com.intellij.psi.PsiClassType
@@ -8,8 +9,6 @@ import com.intellij.psi.PsiField
 import com.intellij.psi.PsiMethod
 import com.intellij.psi.PsiType
 import com.intellij.psi.util.PsiUtil
-import org.jetbrains.uast.UClass
-import org.jetbrains.uast.toUElement
 import ru.dsudomoin.koraplugin.KoraAnnotations
 
 object ConfigPathResolver {
@@ -51,9 +50,9 @@ object ConfigPathResolver {
             val segment = segments[i]
             val altSegment = if ('-' in segment) kebabToCamel(segment) else camelToKebab(segment)
 
-            // Try method first (interfaces, records), then field (data classes)
-            val method = currentClass.findMethodsByName(segment, true).firstOrNull()
-                ?: currentClass.findMethodsByName(altSegment, true).firstOrNull()
+            // Try method first (interfaces, records), then Kotlin val getter, then field (data classes)
+            val method = findMethodOrGetter(currentClass, segment)
+                ?: findMethodOrGetter(currentClass, altSegment)
             val returnType: PsiType?
             if (method != null) {
                 lastElement = method
@@ -112,13 +111,12 @@ object ConfigPathResolver {
      * Map<K, V> members produce a "*" wildcard segment in the path.
      */
     fun resolveMemberToConfigPath(memberName: String, containingClass: PsiClass): String? {
-        val segments = mutableListOf(memberName)
+        val segments = mutableListOf(stripGetterPrefix(memberName))
         var currentClass = containingClass
 
         // Walk up through enclosing classes until we find one with @ConfigSource
         while (true) {
-            val uClass = currentClass.toUElement() as? UClass ?: return null
-            val configSourcePath = extractConfigSourcePath(uClass)
+            val configSourcePath = extractConfigSourcePath(currentClass)
             if (configSourcePath != null) {
                 segments.add(configSourcePath)
                 return segments.reversed().joinToString(".")
@@ -165,7 +163,7 @@ object ConfigPathResolver {
                 || resolveMapValueClass(returnType) == targetClass
                 || resolveCollectionElementClass(returnType) == targetClass
             ) {
-                return m.name to returnType
+                return stripGetterPrefix(m.name) to returnType
             }
         }
         for (f in inClass.fields) {
@@ -206,11 +204,24 @@ object ConfigPathResolver {
         return PsiUtil.resolveClassInClassTypeOnly(typeArgs[0])
     }
 
-    private fun extractConfigSourcePath(uClass: UClass): String? {
-        val annotation = uClass.uAnnotations.find {
-            it.qualifiedName == KoraAnnotations.CONFIG_SOURCE
-        } ?: return null
-        return annotation.findAttributeValue("value")?.evaluate() as? String
+    private fun extractConfigSourcePath(psiClass: PsiClass): String? {
+        val annotation = psiClass.getAnnotation(KoraAnnotations.CONFIG_SOURCE) ?: return null
+        return AnnotationUtil.getStringAttributeValue(annotation, "value")
+    }
+
+    /** Finds a method by direct name or Kotlin val getter name (get + capitalize). */
+    private fun findMethodOrGetter(psiClass: PsiClass, name: String): PsiMethod? {
+        psiClass.findMethodsByName(name, true).firstOrNull()?.let { return it }
+        val getterName = "get${name.replaceFirstChar { it.uppercase() }}"
+        return psiClass.findMethodsByName(getterName, true).firstOrNull()
+    }
+
+    /** Strips Kotlin getter prefix: "getSomeProperty" → "someProperty". Returns name as-is if no prefix. */
+    private fun stripGetterPrefix(methodName: String): String {
+        if (methodName.length > 3 && methodName.startsWith("get") && methodName[3].isUpperCase()) {
+            return methodName[3].lowercase() + methodName.substring(4)
+        }
+        return methodName
     }
 
     private val CAMEL_REGEX = Regex("([a-z0-9])([A-Z])")

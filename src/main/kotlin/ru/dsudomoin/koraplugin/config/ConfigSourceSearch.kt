@@ -1,5 +1,6 @@
 package ru.dsudomoin.koraplugin.config
 
+import com.intellij.codeInsight.AnnotationUtil
 import com.intellij.openapi.project.Project
 import com.intellij.psi.JavaPsiFacade
 import com.intellij.psi.PsiClass
@@ -9,8 +10,6 @@ import com.intellij.psi.search.searches.AnnotatedElementsSearch
 import com.intellij.psi.util.CachedValueProvider
 import com.intellij.psi.util.CachedValuesManager
 import com.intellij.psi.util.PsiModificationTracker
-import org.jetbrains.uast.UClass
-import org.jetbrains.uast.toUElement
 import ru.dsudomoin.koraplugin.KoraAnnotations
 
 data class ConfigSourceEntry(
@@ -40,8 +39,7 @@ object ConfigSourceSearch {
 
         val result = mutableListOf<ConfigSourceEntry>()
         AnnotatedElementsSearch.searchPsiClasses(annotationClass, projectScope).forEach { psiClass ->
-            val uClass = psiClass.toUElement() as? UClass ?: return@forEach
-            val path = extractConfigSourcePath(uClass) ?: return@forEach
+            val path = extractConfigSourcePath(psiClass) ?: return@forEach
             result.add(ConfigSourceEntry(path, psiClass))
         }
         return result
@@ -116,11 +114,8 @@ object ConfigSourceSearch {
         collectReturnTypeFqns(resolved, result, visited)
     }
 
-    private fun extractConfigSourcePath(uClass: UClass): String? {
-        val annotation = uClass.uAnnotations.find {
-            it.qualifiedName == KoraAnnotations.CONFIG_SOURCE
-        } ?: return null
-        val value = annotation.findAttributeValue("value")
-        return value?.evaluate() as? String
+    private fun extractConfigSourcePath(psiClass: PsiClass): String? {
+        val annotation = psiClass.getAnnotation(KoraAnnotations.CONFIG_SOURCE) ?: return null
+        return AnnotationUtil.getStringAttributeValue(annotation, "value")
     }
 }
