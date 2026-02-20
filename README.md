@@ -1,44 +1,62 @@
 # Kora IntelliJ Plugin
 
+[![JetBrains Plugin](https://img.shields.io/jetbrains/plugin/v/30225-kora.svg)](https://plugins.jetbrains.com/plugin/30225-kora)
+[![Downloads](https://img.shields.io/jetbrains/plugin/d/30225-kora.svg)](https://plugins.jetbrains.com/plugin/30225-kora)
+
 [Русский](#русский) | [English](#english)
 
 ---
 
 ## English
 
-IntelliJ IDEA plugin for the [Kora Framework](https://kora-projects.github.io/kora-docs/) — a JVM dependency injection framework without runtime reflection.
-
-Provides Spring-like IDE navigation: jump from injection points directly to their providers.
+IntelliJ IDEA plugin for the [Kora Framework](https://kora-projects.github.io/kora-docs/) — Spring-like navigation, inspections, and code completion for Kora DI.
 
 ### Features
 
-**Go to Declaration**
-- Navigate from constructor parameters and factory method parameters to the component that provides them
-- Supports `@Component` classes, factory methods in `@KoraApp`, `@Module`, `@KoraSubmodule` interfaces
-- Resolves tag-based qualification: `@Tag`, custom meta-annotations, `@Tag.Any`
-- Works with both Java and Kotlin (K1/K2) via UAST
-- Multiple candidates — shows a chooser popup
+**DI Navigation**
+- Navigate from injection parameters to their providers and back
+- `@Component`, `@Repository`, factory methods in `@KoraApp` / `@Module` / `@KoraSubmodule` / `@Generated`
+- Tag resolution: `@Tag`, meta-annotations, `@Tag.Any`
+- Wrapper types: `All<T>`, `ValueOf<T>`, generic type matching
+- Java and Kotlin (K1/K2)
 
 **Gutter Icons**
-- Line markers on providers (classes, factory methods) for quick navigation
-- Line markers on `@ConfigSource` annotations linking to YAML/HOCON config files
+- Providers (`@Component`, `@Repository`, factory methods) — navigate to usages
+- Injection parameters — navigate to providers
+- `@ConfigSource` — navigate to config files
 
 **Config Navigation**
-- Navigate from `@ConfigSource("path")` to the corresponding key in `application.yml` or `application.conf`
-- Navigate from YAML/HOCON config keys back to `@ConfigSource` usages
-- Supports HOCON via optional plugin dependency
+- `@ConfigSource("path")` ↔ keys in `application.yml` / `application.conf` (HOCON)
+- Annotation values → config keys:
+
+| Annotation | Config path |
+|---|---|
+| `@Retry("name")` | `resilient.retry.<name>` |
+| `@CircuitBreaker("name")` | `resilient.circuitbreaker.<name>` |
+| `@Timeout("name")` | `resilient.timeout.<name>` |
+| `@Fallback("name")` | `resilient.fallback.<name>` |
+| `@Cacheable("name")` | `cache.caffeine.<name>` / `cache.redis.<name>` |
+| `@HttpClient(configPath="path")` | `httpClient.<path>` |
+| `@KafkaListener("path")` | `<path>` |
+| `@ScheduleAtFixedRate(config="path")` | `scheduling.<path>` |
+
+**Code Completion**
+- Config keys in YAML based on `@ConfigSource` and annotation config paths
+
+**Inspections**
+- **Missing Kora DI provider** — no matching provider for injection parameter (enabled by default)
+- **Unknown Kora config key** — YAML key not referenced by `@ConfigSource` (disabled by default)
 
 ### Requirements
 
-- IntelliJ IDEA 2025.3+ (build 253+)
+- IntelliJ IDEA 2025.3+
 - Java 21+
 
 ### Installation
 
-#### From Disk
-1. Download the latest release ZIP from [Releases](https://github.com/dsudomoin/kora-intellij-plugin/releases)
-2. In IDEA: **Settings → Plugins → ⚙️ → Install Plugin from Disk...**
-3. Select the ZIP file and restart the IDE
+**Settings → Plugins → Marketplace** → search **"Kora"** → **Install**
+
+Or install from [plugin page](https://plugins.jetbrains.com/plugin/30225-kora).
 
 #### Build from Source
 ```bash
@@ -48,62 +66,58 @@ cd kora-intellij-plugin
 ```
 The plugin ZIP will be in `build/distributions/`.
 
-### Development
-
-```bash
-./gradlew build       # Compile + tests
-./gradlew test        # Tests only
-./gradlew runIde      # Launch sandbox IDE with the plugin
-```
-
-### Supported Kora Annotations
-
-| Annotation | Role |
-|---|---|
-| `@Component` | Marks a class as a DI component (auto-factory) |
-| `@KoraApp` | Main application interface with factory methods |
-| `@Module` | Internal module interface with factory methods |
-| `@KoraSubmodule` | Interface with generated aggregating module |
-| `@Tag` | Tag-based qualifier for disambiguation |
-| `@ConfigSource` | Binds a config class to a config file path |
-
 ---
 
 ## Русский
 
-Плагин IntelliJ IDEA для [Kora Framework](https://kora-projects.github.io/kora-docs/) — JVM-фреймворка внедрения зависимостей без рефлексии в рантайме.
-
-Обеспечивает навигацию в стиле Spring: переход от точек инъекции напрямую к провайдерам компонентов.
+Плагин IntelliJ IDEA для [Kora Framework](https://kora-projects.github.io/kora-docs/) — навигация в стиле Spring, инспекции и code completion для Kora DI.
 
 ### Возможности
 
-**Go to Declaration**
-- Навигация от параметров конструктора и фабричных методов к компоненту-провайдеру
-- Поддержка `@Component` классов, фабричных методов в интерфейсах `@KoraApp`, `@Module`, `@KoraSubmodule`
-- Разрешение тегов: `@Tag`, кастомные мета-аннотации, `@Tag.Any`
-- Работает с Java и Kotlin (K1/K2) через UAST
-- При нескольких кандидатах — всплывающее окно выбора
+**DI-навигация**
+- Навигация от параметров инъекции к провайдерам и обратно
+- `@Component`, `@Repository`, фабричные методы в `@KoraApp` / `@Module` / `@KoraSubmodule` / `@Generated`
+- Разрешение тегов: `@Tag`, мета-аннотации, `@Tag.Any`
+- Wrapper-типы: `All<T>`, `ValueOf<T>`, сопоставление generic-параметров
+- Java и Kotlin (K1/K2)
 
 **Иконки в гуттере**
-- Маркеры на провайдерах (классах, фабричных методах) для быстрой навигации
-- Маркеры на аннотациях `@ConfigSource` со ссылкой на конфиг-файлы YAML/HOCON
+- Провайдеры (`@Component`, `@Repository`, фабричные методы) — переход к использованиям
+- Параметры инъекции — переход к провайдерам
+- `@ConfigSource` — переход к config-файлам
 
 **Навигация по конфигам**
-- Переход из `@ConfigSource("path")` к соответствующему ключу в `application.yml` или `application.conf`
-- Обратная навигация из ключей YAML/HOCON к использованиям `@ConfigSource`
-- Поддержка HOCON через опциональную зависимость
+- `@ConfigSource("path")` ↔ ключи в `application.yml` / `application.conf` (HOCON)
+- Значения аннотаций → config-ключи:
+
+| Аннотация | Конфиг-путь |
+|---|---|
+| `@Retry("name")` | `resilient.retry.<name>` |
+| `@CircuitBreaker("name")` | `resilient.circuitbreaker.<name>` |
+| `@Timeout("name")` | `resilient.timeout.<name>` |
+| `@Fallback("name")` | `resilient.fallback.<name>` |
+| `@Cacheable("name")` | `cache.caffeine.<name>` / `cache.redis.<name>` |
+| `@HttpClient(configPath="path")` | `httpClient.<path>` |
+| `@KafkaListener("path")` | `<path>` |
+| `@ScheduleAtFixedRate(config="path")` | `scheduling.<path>` |
+
+**Code Completion**
+- Config-ключи в YAML на основе `@ConfigSource` и аннотаций с конфиг-путями
+
+**Инспекции**
+- **Missing Kora DI provider** — нет провайдера для параметра инъекции (включена по умолчанию)
+- **Unknown Kora config key** — YAML-ключ не связан с `@ConfigSource` (выключена по умолчанию)
 
 ### Требования
 
-- IntelliJ IDEA 2025.3+ (сборка 253+)
+- IntelliJ IDEA 2025.3+
 - Java 21+
 
 ### Установка
 
-#### С диска
-1. Скачайте ZIP последнего релиза из [Releases](https://github.com/dsudomoin/kora-intellij-plugin/releases)
-2. В IDEA: **Settings → Plugins → ⚙️ → Install Plugin from Disk...**
-3. Выберите ZIP-файл и перезапустите IDE
+**Settings → Plugins → Marketplace** → поиск **"Kora"** → **Install**
+
+Или установите со [страницы плагина](https://plugins.jetbrains.com/plugin/30225-kora).
 
 #### Сборка из исходников
 ```bash
@@ -113,27 +127,8 @@ cd kora-intellij-plugin
 ```
 ZIP плагина будет в `build/distributions/`.
 
-### Разработка
-
-```bash
-./gradlew build       # Компиляция + тесты
-./gradlew test        # Только тесты
-./gradlew runIde      # Запуск песочницы IDE с плагином
-```
-
-### Поддерживаемые аннотации Kora
-
-| Аннотация | Назначение |
-|---|---|
-| `@Component` | Помечает класс как DI-компонент (автоматическая фабрика) |
-| `@KoraApp` | Главный интерфейс приложения с фабричными методами |
-| `@Module` | Внутренний модульный интерфейс с фабричными методами |
-| `@KoraSubmodule` | Интерфейс с генерируемым агрегирующим модулем |
-| `@Tag` | Тег-квалификатор для разрешения неоднозначностей |
-| `@ConfigSource` | Привязка конфиг-класса к пути в конфиг-файле |
-
 ---
 
 ## License
 
-Apache License 2.0
+MIT
