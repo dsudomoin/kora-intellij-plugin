@@ -16,6 +16,8 @@ object KoraAnnotations {
     const val VALUE_OF_TYPE = "ru.tinkoff.kora.application.graph.ValueOf"
     const val GENERATED = "ru.tinkoff.kora.common.annotation.Generated"
     const val CONFIG_SOURCE = "ru.tinkoff.kora.config.common.annotation.ConfigSource"
+    const val CONFIG_VALUE_EXTRACTOR_ANNOTATION = "ru.tinkoff.kora.config.common.annotation.ConfigValueExtractor"
+    const val CONFIG_VALUE_EXTRACTOR_TYPE = "ru.tinkoff.kora.config.common.extractor.ConfigValueExtractor"
 
     // Kafka
     const val KAFKA_LISTENER = "ru.tinkoff.kora.kafka.common.annotation.KafkaListener"
@@ -39,6 +41,13 @@ object KoraAnnotations {
 
     // HTTP Client
     const val HTTP_CLIENT = "ru.tinkoff.kora.http.client.common.annotation.HttpClient"
+
+    // JSON
+    const val JSON = "ru.tinkoff.kora.json.common.annotation.Json"
+    const val JSON_READER_ANNOTATION = "ru.tinkoff.kora.json.common.annotation.JsonReader"
+    const val JSON_WRITER_ANNOTATION = "ru.tinkoff.kora.json.common.annotation.JsonWriter"
+    const val JSON_READER_TYPE = "ru.tinkoff.kora.json.common.JsonReader"
+    const val JSON_WRITER_TYPE = "ru.tinkoff.kora.json.common.JsonWriter"
 
     /** Type FQN prefixes for which ClassInheritorsSearch is skipped (too many inheritors). */
     val COMMON_TYPE_PREFIXES = arrayOf("java.", "javax.", "kotlin.", "kotlinx.")
