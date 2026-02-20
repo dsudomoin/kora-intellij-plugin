@@ -1,5 +1,6 @@
 package ru.dsudomoin.koraplugin.config
 
+import com.intellij.codeInsight.AnnotationUtil
 import com.intellij.openapi.project.Project
 import com.intellij.psi.PsiClass
 import com.intellij.psi.PsiClassType
@@ -8,8 +9,6 @@ import com.intellij.psi.PsiField
 import com.intellij.psi.PsiMethod
 import com.intellij.psi.PsiType
 import com.intellij.psi.util.PsiUtil
-import org.jetbrains.uast.UClass
-import org.jetbrains.uast.toUElement
 import ru.dsudomoin.koraplugin.KoraAnnotations
 
 object ConfigPathResolver {
@@ -117,8 +116,7 @@ object ConfigPathResolver {
 
         // Walk up through enclosing classes until we find one with @ConfigSource
         while (true) {
-            val uClass = currentClass.toUElement() as? UClass ?: return null
-            val configSourcePath = extractConfigSourcePath(uClass)
+            val configSourcePath = extractConfigSourcePath(currentClass)
             if (configSourcePath != null) {
                 segments.add(configSourcePath)
                 return segments.reversed().joinToString(".")
@@ -206,11 +204,9 @@ object ConfigPathResolver {
         return PsiUtil.resolveClassInClassTypeOnly(typeArgs[0])
     }
 
-    private fun extractConfigSourcePath(uClass: UClass): String? {
-        val annotation = uClass.uAnnotations.find {
-            it.qualifiedName == KoraAnnotations.CONFIG_SOURCE
-        } ?: return null
-        return annotation.findAttributeValue("value")?.evaluate() as? String
+    private fun extractConfigSourcePath(psiClass: PsiClass): String? {
+        val annotation = psiClass.getAnnotation(KoraAnnotations.CONFIG_SOURCE) ?: return null
+        return AnnotationUtil.getStringAttributeValue(annotation, "value")
     }
 
     /** Finds a method by direct name or Kotlin val getter name (get + capitalize). */
