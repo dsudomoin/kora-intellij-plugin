@@ -1,0 +1,7 @@
+<idea-plugin>
+    <actions>
+        <reference id="Kora.ImportDataSources">
+            <add-to-group group-id="DatabaseViewPopupMenu" anchor="last"/>
+        </reference>
+    </actions>
+</idea-plugin>

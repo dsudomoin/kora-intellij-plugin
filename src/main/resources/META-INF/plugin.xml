@@ -14,8 +14,10 @@
     <depends>org.jetbrains.kotlin</depends>
     <depends>org.jetbrains.plugins.yaml</depends>
     <depends optional="true" config-file="hocon-support.xml">org.jetbrains.plugins.hocon</depends>
+    <depends optional="true" config-file="database-support.xml">com.intellij.database</depends>
 
     <extensions defaultExtensionNs="com.intellij">
+        <notificationGroup id="Kora Plugin" displayType="BALLOON"/>
         <fileBasedIndex implementation="ru.dsudomoin.koraplugin.index.KoraProviderIndex"/>
         <fileBasedIndex implementation="ru.dsudomoin.koraplugin.index.KoraInjectionSiteIndex"/>
 
@@ -57,4 +59,13 @@
     <extensions defaultExtensionNs="org.jetbrains.kotlin">
         <supportsKotlinPluginMode supportsK2="true"/>
     </extensions>
+
+    <actions>
+        <action id="Kora.ImportDataSources"
+                class="ru.dsudomoin.koraplugin.config.datasource.ImportKoraDataSourcesAction"
+                text="Kora: Import Data Sources from Config"
+                description="Import database data sources from Kora application config files">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
+    </actions>
 </idea-plugin>

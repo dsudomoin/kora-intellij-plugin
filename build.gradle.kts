@@ -32,8 +32,10 @@ dependencies {
         bundledPlugin("org.jetbrains.kotlin")
         bundledPlugin("org.jetbrains.plugins.yaml")
         plugin("org.jetbrains.plugins.hocon", "2026.1.1")
+        bundledPlugin("com.intellij.database")
     }
 
+    implementation("com.typesafe:config:1.4.3")
     testImplementation("junit:junit:4.13.2")
 }
 
