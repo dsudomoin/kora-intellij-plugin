@@ -54,6 +54,12 @@
                 implementationClass="ru.dsudomoin.koraplugin.inspection.KoraUnknownConfigKeyInspection"/>
     </extensions>
 
+    <extensions defaultExtensionNs="com.intellij.modules.ultimate">
+        <dependencySupport kind="java"
+                coordinate="ru.tinkoff.kora:kora-common"
+                displayName="Kora"/>
+    </extensions>
+
     <extensions defaultExtensionNs="org.jetbrains.kotlin">
         <supportsKotlinPluginMode supportsK2="true"/>
     </extensions>
