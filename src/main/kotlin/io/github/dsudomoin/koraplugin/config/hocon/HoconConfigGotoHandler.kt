@@ -3,6 +3,7 @@ package io.github.dsudomoin.koraplugin.config.hocon
 import com.intellij.codeInsight.navigation.actions.GotoDeclarationHandler
 import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.editor.Editor
+import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.project.DumbService
 import com.intellij.psi.PsiElement
 import com.intellij.psi.util.PsiTreeUtil
@@ -30,14 +31,23 @@ class HoconConfigGotoHandler : GotoDeclarationHandler {
         if (fullPathOption.isEmpty) return null
         val fullPath = fullPathOption.get() as String
 
-        return ReadAction.compute<Array<PsiElement>?, RuntimeException> {
-            val configSourceTarget = ConfigPathResolver.resolveConfigKeyToMethod(project, fullPath)
-            if (configSourceTarget != null) return@compute arrayOf(configSourceTarget)
+        var result: Array<PsiElement>? = null
+        ProgressManager.getInstance().runProcessWithProgressSynchronously(
+            {
+                result = ReadAction.compute<Array<PsiElement>?, RuntimeException> {
+                    val configSourceTarget = ConfigPathResolver.resolveConfigKeyToMethod(project, fullPath)
+                    if (configSourceTarget != null) return@compute arrayOf(configSourceTarget)
 
-            val annotationTargets = KoraConfigAnnotationRegistry.findAnnotatedElements(project, fullPath)
-            if (annotationTargets.isNotEmpty()) return@compute annotationTargets.toTypedArray()
+                    val annotationTargets = KoraConfigAnnotationRegistry.findAnnotatedElements(project, fullPath)
+                    if (annotationTargets.isNotEmpty()) return@compute annotationTargets.toTypedArray()
 
-            null
-        }
+                    null
+                }
+            },
+            "Resolving config key...",
+            true,
+            project,
+        )
+        return result
     }
 }

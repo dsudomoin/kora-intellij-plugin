@@ -8,7 +8,9 @@ import com.intellij.codeInsight.navigation.PsiTargetNavigator
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.editor.markup.GutterIconRenderer
 import com.intellij.openapi.application.ReadAction
+import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
+import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.project.Project
@@ -294,10 +296,10 @@ class KoraLineMarkerProvider : LineMarkerProvider, DumbAware {
     ) : GutterIconNavigationHandler<PsiElement> {
         override fun navigate(e: MouseEvent, elt: PsiElement) {
             val project = elt.project
-            var targets: List<InjectionSiteTarget> = emptyList()
+            object : Task.Backgroundable(project, "Searching for Kora DI usages...", true) {
+                private var targets: List<InjectionSiteTarget> = emptyList()
 
-            ProgressManager.getInstance().runProcessWithProgressSynchronously(
-                {
+                override fun run(indicator: ProgressIndicator) {
                     targets = ReadAction.compute<List<InjectionSiteTarget>, RuntimeException> {
                         val usages = if (methodName != null) {
                             KoraBeanNavigator.resolveFactoryMethodUsages(project, classFqn, methodName)
@@ -306,13 +308,12 @@ class KoraLineMarkerProvider : LineMarkerProvider, DumbAware {
                         }
                         buildInjectionSiteTargets(usages)
                     }
-                },
-                "Searching for Kora DI usages...",
-                true,
-                project,
-            )
+                }
 
-            navigateToInjectionSites(e, project, targets, "Choose Kora DI Usage")
+                override fun onSuccess() {
+                    navigateToInjectionSites(e, project, targets, "Choose Kora DI Usage")
+                }
+            }.queue()
         }
     }
 
@@ -339,9 +340,10 @@ class KoraLineMarkerProvider : LineMarkerProvider, DumbAware {
         }
 
         private fun navigateToUsagesLazy(e: MouseEvent, project: Project) {
-            var targets: List<InjectionSiteTarget> = emptyList()
-            ProgressManager.getInstance().runProcessWithProgressSynchronously(
-                {
+            object : Task.Backgroundable(project, "Searching for injection sites...", true) {
+                private var targets: List<InjectionSiteTarget> = emptyList()
+
+                override fun run(indicator: ProgressIndicator) {
                     targets = ReadAction.compute<List<InjectionSiteTarget>, RuntimeException> {
                         val usages = if (methodName != null) {
                             KoraBeanNavigator.resolveFactoryMethodUsages(project, classFqn, methodName)
@@ -350,18 +352,19 @@ class KoraLineMarkerProvider : LineMarkerProvider, DumbAware {
                         }
                         buildInjectionSiteTargets(usages)
                     }
-                },
-                "Searching for injection sites...",
-                true,
-                project,
-            )
-            navigateToInjectionSites(e, project, targets, "Choose Injection Site")
+                }
+
+                override fun onSuccess() {
+                    navigateToInjectionSites(e, project, targets, "Choose Injection Site")
+                }
+            }.queue()
         }
 
         private fun navigateToProvidersLazy(e: MouseEvent, project: Project) {
-            var paramProviders: List<ParamProviders> = emptyList()
-            ProgressManager.getInstance().runProcessWithProgressSynchronously(
-                {
+            object : Task.Backgroundable(project, "Searching for dependency providers...", true) {
+                private var paramProviders: List<ParamProviders> = emptyList()
+
+                override fun run(indicator: ProgressIndicator) {
                     paramProviders = ReadAction.compute<List<ParamProviders>, RuntimeException> {
                         if (methodName != null) {
                             KoraBeanNavigator.resolveMethodParamProviders(project, classFqn, methodName, sameLineParamNames)
@@ -369,46 +372,45 @@ class KoraLineMarkerProvider : LineMarkerProvider, DumbAware {
                             KoraBeanNavigator.resolveConstructorParamProviders(project, classFqn, sameLineParamNames)
                         }
                     }
-                },
-                "Searching for dependency providers...",
-                true,
-                project,
-            )
-
-            if (paramProviders.isEmpty()) {
-                JBPopupFactory.getInstance()
-                    .createHtmlTextBalloonBuilder("No dependency providers found", com.intellij.openapi.ui.MessageType.WARNING, null)
-                    .createBalloon()
-                    .show(RelativePoint(e), com.intellij.openapi.ui.popup.Balloon.Position.above)
-                return
-            }
-            if (paramProviders.size == 1) {
-                val single = paramProviders.single()
-                navigateToElements(e, project, single.providers, "Choose Dependency Provider", "No providers found")
-                return
-            }
-
-            JBPopupFactory.getInstance()
-                .createPopupChooserBuilder(paramProviders)
-                .setTitle("Choose Dependency")
-                .setRenderer(object : javax.swing.DefaultListCellRenderer() {
-                    override fun getListCellRendererComponent(
-                        list: javax.swing.JList<*>?,
-                        value: Any?,
-                        index: Int,
-                        isSelected: Boolean,
-                        cellHasFocus: Boolean,
-                    ): java.awt.Component {
-                        super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus)
-                        if (value is ParamProviders) text = "${value.paramName}: ${value.paramTypeText}"
-                        return this
-                    }
-                })
-                .setItemChosenCallback { pp ->
-                    navigateToElements(e, project, pp.providers, "Choose Dependency Provider", "No providers found")
                 }
-                .createPopup()
-                .show(RelativePoint(e))
+
+                override fun onSuccess() {
+                    if (paramProviders.isEmpty()) {
+                        JBPopupFactory.getInstance()
+                            .createHtmlTextBalloonBuilder("No dependency providers found", com.intellij.openapi.ui.MessageType.WARNING, null)
+                            .createBalloon()
+                            .show(RelativePoint(e), com.intellij.openapi.ui.popup.Balloon.Position.above)
+                        return
+                    }
+                    if (paramProviders.size == 1) {
+                        val single = paramProviders.single()
+                        navigateToElements(e, project, single.providers, "Choose Dependency Provider", "No providers found")
+                        return
+                    }
+
+                    JBPopupFactory.getInstance()
+                        .createPopupChooserBuilder(paramProviders)
+                        .setTitle("Choose Dependency")
+                        .setRenderer(object : javax.swing.DefaultListCellRenderer() {
+                            override fun getListCellRendererComponent(
+                                list: javax.swing.JList<*>?,
+                                value: Any?,
+                                index: Int,
+                                isSelected: Boolean,
+                                cellHasFocus: Boolean,
+                            ): java.awt.Component {
+                                super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus)
+                                if (value is ParamProviders) text = "${value.paramName}: ${value.paramTypeText}"
+                                return this
+                            }
+                        })
+                        .setItemChosenCallback { pp ->
+                            navigateToElements(e, project, pp.providers, "Choose Dependency Provider", "No providers found")
+                        }
+                        .createPopup()
+                        .show(RelativePoint(e))
+                }
+            }.queue()
         }
 
         companion object {
@@ -420,18 +422,19 @@ class KoraLineMarkerProvider : LineMarkerProvider, DumbAware {
     private class SingleParamNavigationHandler : GutterIconNavigationHandler<PsiElement> {
         override fun navigate(e: MouseEvent, elt: PsiElement) {
             val project = elt.project
-            var targets: List<PsiElement> = emptyList()
-            ProgressManager.getInstance().runProcessWithProgressSynchronously(
-                {
+            object : Task.Backgroundable(project, "Searching for Kora DI providers...", true) {
+                private var targets: List<PsiElement> = emptyList()
+
+                override fun run(indicator: ProgressIndicator) {
                     targets = ReadAction.compute<List<PsiElement>, RuntimeException> {
                         KoraProviderResolver.resolve(elt).distinct()
                     }
-                },
-                "Searching for Kora DI providers...",
-                true,
-                project,
-            )
-            navigateToElements(e, project, targets, "Choose Kora DI Provider", "No providers found")
+                }
+
+                override fun onSuccess() {
+                    navigateToElements(e, project, targets, "Choose Kora DI Provider", "No providers found")
+                }
+            }.queue()
         }
     }
 
@@ -467,21 +470,22 @@ class KoraLineMarkerProvider : LineMarkerProvider, DumbAware {
                     }
                 })
                 .setItemChosenCallback { paramInfo ->
-                    var targets: List<PsiElement> = emptyList()
-                    ProgressManager.getInstance().runProcessWithProgressSynchronously(
-                        {
+                    object : Task.Backgroundable(project, "Searching for Kora DI providers...", true) {
+                        private var targets: List<PsiElement> = emptyList()
+
+                        override fun run(indicator: ProgressIndicator) {
                             targets = ReadAction.compute<List<PsiElement>, RuntimeException> {
                                 // Re-lookup PSI fresh to avoid stale references
                                 val nameElement = findParamElement(project, classFqn, methodName, paramInfo.name)
                                     ?: return@compute emptyList()
                                 KoraProviderResolver.resolve(nameElement).distinct()
                             }
-                        },
-                        "Searching for Kora DI providers...",
-                        true,
-                        project,
-                    )
-                    navigateToElements(e, project, targets, "Choose Kora DI Provider", "No providers found")
+                        }
+
+                        override fun onSuccess() {
+                            navigateToElements(e, project, targets, "Choose Kora DI Provider", "No providers found")
+                        }
+                    }.queue()
                 }
                 .createPopup()
                 .show(RelativePoint(e))

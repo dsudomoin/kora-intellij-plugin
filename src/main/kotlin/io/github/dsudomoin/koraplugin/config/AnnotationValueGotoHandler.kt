@@ -35,20 +35,16 @@ class AnnotationValueGotoHandler : GotoDeclarationHandler {
 
         // Walk up PSI tree to find the enclosing annotation
         val annotationPsi = findEnclosingAnnotation(sourceElement) ?: return null
-        // Convert annotation PSI to UAnnotation
-        val uAnnotation = annotationPsi.toUElement() as? UAnnotation ?: return null
 
-        val fqn = uAnnotation.qualifiedName
-        if (fqn == null || fqn !in KoraConfigAnnotationRegistry.allAnnotationFqns) return null
-
-        val paths = KoraConfigAnnotationRegistry.resolveConfigPaths(uAnnotation)
-        if (paths.isEmpty()) return null
-
-        // Heavy: FilenameIndex + PSI traversal → run off EDT
+        // Heavy: UAST resolution + FilenameIndex + PSI traversal → run off EDT
         var targets: List<PsiElement> = emptyList()
         ProgressManager.getInstance().runProcessWithProgressSynchronously(
             {
                 targets = ReadAction.compute<List<PsiElement>, RuntimeException> {
+                    val uAnnotation = annotationPsi.toUElement() as? UAnnotation ?: return@compute emptyList()
+                    val fqn = uAnnotation.qualifiedName ?: return@compute emptyList()
+                    if (fqn !in KoraConfigAnnotationRegistry.allAnnotationFqns) return@compute emptyList()
+                    val paths = KoraConfigAnnotationRegistry.resolveConfigPaths(uAnnotation)
                     paths.flatMap { findConfigKeyElements(project, it) }
                 }
             },

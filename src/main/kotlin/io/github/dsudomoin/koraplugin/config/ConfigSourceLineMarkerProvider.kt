@@ -7,7 +7,9 @@ import com.intellij.codeInsight.navigation.PsiTargetNavigator
 import com.intellij.codeInsight.navigation.openFileWithPsiElement
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.editor.markup.GutterIconRenderer
+import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
+import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.project.Project
@@ -124,38 +126,37 @@ class ConfigSourceLineMarkerProvider : LineMarkerProvider, DumbAware {
     private class ConfigGutterNavigationHandler : GutterIconNavigationHandler<PsiElement> {
         override fun navigate(e: MouseEvent, elt: PsiElement) {
             val project = elt.project
-            var configPath: String? = null
-            var targets: List<PsiElement> = emptyList()
+            object : Task.Backgroundable(project, "Resolving config key...", true) {
+                private var configPath: String? = null
+                private var targets: List<PsiElement> = emptyList()
 
-            ProgressManager.getInstance().runProcessWithProgressSynchronously(
-                {
+                override fun run(indicator: ProgressIndicator) {
                     com.intellij.openapi.application.ReadAction.compute<Unit, RuntimeException> {
                         configPath = resolveConfigPath(elt)
                         if (configPath != null) {
                             targets = findConfigKeyElements(project, configPath!!)
                         }
                     }
-                },
-                "Resolving config key...",
-                true,
-                project,
-            )
-
-            val path = configPath ?: return
-            when (targets.size) {
-                0 -> {
-                    JBPopupFactory.getInstance()
-                        .createHtmlTextBalloonBuilder(
-                            "Config key not found: <b>$path</b>",
-                            MessageType.WARNING,
-                            null,
-                        )
-                        .createBalloon()
-                        .show(RelativePoint(e), Balloon.Position.above)
                 }
-                1 -> openFileWithPsiElement(targets.single(), true, true)
-                else -> PsiTargetNavigator(targets).navigate(e, "Choose Config Key", project)
-            }
+
+                override fun onSuccess() {
+                    val path = configPath ?: return
+                    when (targets.size) {
+                        0 -> {
+                            JBPopupFactory.getInstance()
+                                .createHtmlTextBalloonBuilder(
+                                    "Config key not found: <b>$path</b>",
+                                    MessageType.WARNING,
+                                    null,
+                                )
+                                .createBalloon()
+                                .show(RelativePoint(e), Balloon.Position.above)
+                        }
+                        1 -> openFileWithPsiElement(targets.single(), true, true)
+                        else -> PsiTargetNavigator(targets).navigate(e, "Choose Config Key", project)
+                    }
+                }
+            }.queue()
         }
 
         private fun resolveConfigPath(elt: PsiElement): String? {

@@ -1,4 +1,4 @@
-<idea-plugin>
+<idea-plugin package="io.github.dsudomoin.koraplugin">
     <id>io.github.dsudomoin.kora-plugin</id>
     <name>Kora Support</name>
     <vendor>dsudomoin</vendor>
