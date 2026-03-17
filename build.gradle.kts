@@ -4,10 +4,10 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21
 plugins {
     id("java")
     id("org.jetbrains.kotlin.jvm") version "2.3.0"
-    id("org.jetbrains.intellij.platform") version "2.10.4"
+    id("org.jetbrains.intellij.platform") version "2.13.1"
 }
 
-group = "ru.dsudomoin"
+group = "io.github.dsudomoin"
 version = providers.exec {
     commandLine("git", "describe", "--tags", "--abbrev=0")
     isIgnoreExitValue = true

@@ -1,5 +1,5 @@
 <idea-plugin>
-    <id>ru.dsudomoin.kora-plugin</id>
+    <id>io.github.dsudomoin.kora-plugin</id>
     <name>Kora</name>
     <vendor>dsudomoin</vendor>
 
@@ -16,21 +16,21 @@
     <depends optional="true" config-file="hocon-support.xml">org.jetbrains.plugins.hocon</depends>
 
     <extensions defaultExtensionNs="com.intellij">
-        <fileBasedIndex implementation="ru.dsudomoin.koraplugin.index.KoraProviderIndex"/>
-        <fileBasedIndex implementation="ru.dsudomoin.koraplugin.index.KoraInjectionSiteIndex"/>
+        <fileBasedIndex implementation="io.github.dsudomoin.koraplugin.index.KoraProviderIndex"/>
+        <fileBasedIndex implementation="io.github.dsudomoin.koraplugin.index.KoraInjectionSiteIndex"/>
 
         <gotoDeclarationHandler order="first"
-                implementation="ru.dsudomoin.koraplugin.config.yaml.YamlConfigGotoHandler"/>
+                implementation="io.github.dsudomoin.koraplugin.config.yaml.YamlConfigGotoHandler"/>
         <gotoDeclarationHandler order="first"
-                implementation="ru.dsudomoin.koraplugin.config.AnnotationValueGotoHandler"/>
+                implementation="io.github.dsudomoin.koraplugin.config.AnnotationValueGotoHandler"/>
         <codeInsight.lineMarkerProvider language="JAVA" order="last"
-                implementationClass="ru.dsudomoin.koraplugin.navigation.KoraLineMarkerProvider"/>
+                implementationClass="io.github.dsudomoin.koraplugin.navigation.KoraLineMarkerProvider"/>
         <codeInsight.lineMarkerProvider language="kotlin" order="last"
-                implementationClass="ru.dsudomoin.koraplugin.navigation.KoraLineMarkerProvider"/>
+                implementationClass="io.github.dsudomoin.koraplugin.navigation.KoraLineMarkerProvider"/>
         <codeInsight.lineMarkerProvider language="JAVA" order="last"
-                implementationClass="ru.dsudomoin.koraplugin.config.ConfigSourceLineMarkerProvider"/>
+                implementationClass="io.github.dsudomoin.koraplugin.config.ConfigSourceLineMarkerProvider"/>
         <codeInsight.lineMarkerProvider language="kotlin" order="last"
-                implementationClass="ru.dsudomoin.koraplugin.config.ConfigSourceLineMarkerProvider"/>
+                implementationClass="io.github.dsudomoin.koraplugin.config.ConfigSourceLineMarkerProvider"/>
 
         <localInspection
                 language="UAST"
@@ -39,10 +39,10 @@
                 displayName="Missing Kora DI provider"
                 enabledByDefault="true"
                 level="WEAK WARNING"
-                implementationClass="ru.dsudomoin.koraplugin.inspection.KoraMissingProviderInspection"/>
+                implementationClass="io.github.dsudomoin.koraplugin.inspection.KoraMissingProviderInspection"/>
 
         <completion.contributor language="yaml"
-                implementationClass="ru.dsudomoin.koraplugin.config.yaml.KoraYamlCompletionContributor"/>
+                implementationClass="io.github.dsudomoin.koraplugin.config.yaml.KoraYamlCompletionContributor"/>
 
         <localInspection
                 language="yaml"
@@ -51,7 +51,7 @@
                 displayName="Unknown Kora config key"
                 enabledByDefault="false"
                 level="WEAK WARNING"
-                implementationClass="ru.dsudomoin.koraplugin.inspection.KoraUnknownConfigKeyInspection"/>
+                implementationClass="io.github.dsudomoin.koraplugin.inspection.KoraUnknownConfigKeyInspection"/>
     </extensions>
 
     <extensions defaultExtensionNs="com.intellij.modules.ultimate">
