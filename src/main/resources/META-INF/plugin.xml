@@ -1,6 +1,6 @@
 <idea-plugin>
     <id>io.github.dsudomoin.kora-plugin</id>
-    <name>Kora</name>
+    <name>Kora Support</name>
     <vendor>dsudomoin</vendor>
 
     <description><![CDATA[
