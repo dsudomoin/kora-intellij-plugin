@@ -1,6 +1,6 @@
 <idea-plugin>
     <extensions defaultExtensionNs="com.intellij">
         <gotoDeclarationHandler order="first"
-                implementation="ru.dsudomoin.koraplugin.config.hocon.HoconConfigGotoHandler"/>
+                implementation="io.github.dsudomoin.koraplugin.config.hocon.HoconConfigGotoHandler"/>
     </extensions>
 </idea-plugin>
