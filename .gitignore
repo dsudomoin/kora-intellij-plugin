@@ -49,3 +49,6 @@ com/
 *.hprof
 CLAUDE.md
 task.md
+
+### Superpowers specs & plans (local working artifacts, never committed) ###
+docs/superpowers/
