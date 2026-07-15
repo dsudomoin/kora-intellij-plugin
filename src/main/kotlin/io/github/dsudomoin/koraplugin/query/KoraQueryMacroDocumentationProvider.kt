@@ -57,6 +57,10 @@ private class KoraMacroDocumentationTarget(
             body.append("</code>")
         }
         body.append("<br/><br/>Target: <code>").append(StringUtil.escapeXmlEntities(macro.target)).append("</code>")
+        val targetType = KoraQueryMacroExpander.resolveTargetClass(method, macro.target)?.name
+        if (targetType != null) {
+            body.append(" → <code>").append(StringUtil.escapeXmlEntities(targetType)).append("</code>")
+        }
         return DocumentationResult.documentation(body.toString())
     }
 }
