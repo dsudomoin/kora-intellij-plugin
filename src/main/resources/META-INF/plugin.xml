@@ -56,23 +56,6 @@
 
         <platform.backend.documentation.targetProvider
                 implementation="io.github.dsudomoin.koraplugin.query.KoraQueryMacroDocumentationProvider"/>
-
-        <codeInsight.declarativeInlayProvider
-                language="JAVA"
-                providerId="kora.query.macro.expansion"
-                isEnabledByDefault="true"
-                group="OTHER_GROUP"
-                bundle="messages.KoraBundle"
-                nameKey="inlay.kora.query.macro.name"
-                implementationClass="io.github.dsudomoin.koraplugin.query.KoraQueryMacroInlayHintsProvider"/>
-        <codeInsight.declarativeInlayProvider
-                language="kotlin"
-                providerId="kora.query.macro.expansion"
-                isEnabledByDefault="true"
-                group="OTHER_GROUP"
-                bundle="messages.KoraBundle"
-                nameKey="inlay.kora.query.macro.name"
-                implementationClass="io.github.dsudomoin.koraplugin.query.KoraQueryMacroInlayHintsProvider"/>
     </extensions>
 
     <extensions defaultExtensionNs="com.intellij.modules.ultimate">
