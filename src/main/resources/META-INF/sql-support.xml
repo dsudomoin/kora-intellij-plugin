@@ -1,0 +1,6 @@
+<idea-plugin>
+    <extensions defaultExtensionNs="com.intellij">
+        <multiHostInjector order="first"
+                implementation="io.github.dsudomoin.koraplugin.query.KoraQuerySqlInjector"/>
+    </extensions>
+</idea-plugin>

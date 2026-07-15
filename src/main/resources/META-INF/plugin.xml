@@ -14,6 +14,7 @@
     <depends>org.jetbrains.kotlin</depends>
     <depends>org.jetbrains.plugins.yaml</depends>
     <depends optional="true" config-file="hocon-support.xml">org.jetbrains.plugins.hocon</depends>
+    <depends optional="true" config-file="sql-support.xml">com.intellij.database</depends>
 
     <extensions defaultExtensionNs="com.intellij">
         <fileBasedIndex implementation="io.github.dsudomoin.koraplugin.index.KoraProviderIndex"/>
