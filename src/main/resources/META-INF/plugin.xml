@@ -52,6 +52,9 @@
                 enabledByDefault="false"
                 level="WEAK WARNING"
                 implementationClass="io.github.dsudomoin.koraplugin.inspection.KoraUnknownConfigKeyInspection"/>
+
+        <platform.backend.documentation.targetProvider
+                implementation="io.github.dsudomoin.koraplugin.query.KoraQueryMacroDocumentationProvider"/>
     </extensions>
 
     <extensions defaultExtensionNs="com.intellij.modules.ultimate">
