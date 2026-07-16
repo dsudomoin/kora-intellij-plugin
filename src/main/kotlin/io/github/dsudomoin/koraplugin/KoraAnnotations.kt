@@ -3,6 +3,10 @@ package io.github.dsudomoin.koraplugin
 object KoraAnnotations {
     const val COMPONENT = "ru.tinkoff.kora.common.Component"
     const val REPOSITORY = "ru.tinkoff.kora.database.common.annotation.Repository"
+    const val QUERY = "ru.tinkoff.kora.database.common.annotation.Query"
+    const val TABLE = "ru.tinkoff.kora.database.common.annotation.Table"
+    const val COLUMN = "ru.tinkoff.kora.database.common.annotation.Column"
+    const val ID = "ru.tinkoff.kora.database.common.annotation.Id"
 
     /** Annotations that mark a class as a DI-provided component. */
     val COMPONENT_LIKE = listOf(COMPONENT, REPOSITORY)
