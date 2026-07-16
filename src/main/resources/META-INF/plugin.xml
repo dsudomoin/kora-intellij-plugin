@@ -56,13 +56,6 @@
 
         <platform.backend.documentation.targetProvider
                 implementation="io.github.dsudomoin.koraplugin.query.KoraQueryMacroDocumentationProvider"/>
-
-        <gotoDeclarationHandler order="first"
-                implementation="io.github.dsudomoin.koraplugin.query.KoraQueryMacroGotoDeclarationHandler"/>
-        <lang.documentationProvider language="JAVA"
-                implementationClass="io.github.dsudomoin.koraplugin.query.KoraQueryMacroQuickNavigateProvider"/>
-        <lang.documentationProvider language="kotlin"
-                implementationClass="io.github.dsudomoin.koraplugin.query.KoraQueryMacroQuickNavigateProvider"/>
     </extensions>
 
     <extensions defaultExtensionNs="com.intellij.modules.ultimate">
