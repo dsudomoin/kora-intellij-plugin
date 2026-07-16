@@ -57,16 +57,12 @@
         <platform.backend.documentation.targetProvider
                 implementation="io.github.dsudomoin.koraplugin.query.KoraQueryMacroDocumentationProvider"/>
 
-        <psi.symbolReferenceProvider
-                hostLanguage="JAVA"
-                hostElementClass="com.intellij.psi.PsiLiteralExpression"
-                targetClass="io.github.dsudomoin.koraplugin.query.KoraQueryMacroSymbol"
-                implementationClass="io.github.dsudomoin.koraplugin.query.KoraQueryMacroSymbolReferenceProvider"/>
-        <psi.symbolReferenceProvider
-                hostLanguage="kotlin"
-                hostElementClass="org.jetbrains.kotlin.psi.KtStringTemplateExpression"
-                targetClass="io.github.dsudomoin.koraplugin.query.KoraQueryMacroSymbol"
-                implementationClass="io.github.dsudomoin.koraplugin.query.KoraQueryMacroSymbolReferenceProvider"/>
+        <gotoDeclarationHandler order="first"
+                implementation="io.github.dsudomoin.koraplugin.query.KoraQueryMacroGotoDeclarationHandler"/>
+        <lang.documentationProvider language="JAVA"
+                implementationClass="io.github.dsudomoin.koraplugin.query.KoraQueryMacroQuickNavigateProvider"/>
+        <lang.documentationProvider language="kotlin"
+                implementationClass="io.github.dsudomoin.koraplugin.query.KoraQueryMacroQuickNavigateProvider"/>
     </extensions>
 
     <extensions defaultExtensionNs="com.intellij.modules.ultimate">
