@@ -36,22 +36,16 @@ class AnnotationValueGotoHandler : GotoDeclarationHandler {
         // Walk up PSI tree to find the enclosing annotation
         val annotationPsi = findEnclosingAnnotation(sourceElement) ?: return null
 
-        // Heavy: UAST resolution + FilenameIndex + PSI traversal → run off EDT
-        var targets: List<PsiElement> = emptyList()
-        ProgressManager.getInstance().runProcessWithProgressSynchronously(
-            {
-                targets = ReadAction.compute<List<PsiElement>, RuntimeException> {
-                    val uAnnotation = annotationPsi.toUElement() as? UAnnotation ?: return@compute emptyList()
-                    val fqn = uAnnotation.qualifiedName ?: return@compute emptyList()
-                    if (fqn !in KoraConfigAnnotationRegistry.allAnnotationFqns) return@compute emptyList()
-                    val paths = KoraConfigAnnotationRegistry.resolveConfigPaths(uAnnotation)
-                    paths.flatMap { findConfigKeyElements(project, it) }
-                }
-            },
-            "Resolving config key...",
-            true,
-            project,
-        )
+        // Heavy — UAST resolution, FilenameIndex, PSI traversal — but the platform already runs this
+        // handler off EDT, under a modal progress and inside a read action (ActionUtil#underModalProgress).
+        // Wrapping it in a progress of our own would invokeAndWait from that read action, which is a
+        // deadlock risk the platform logs and blames on us.
+        val uAnnotation = annotationPsi.toUElement() as? UAnnotation ?: return null
+        val fqn = uAnnotation.qualifiedName ?: return null
+        if (fqn !in KoraConfigAnnotationRegistry.allAnnotationFqns) return null
+
+        val paths = KoraConfigAnnotationRegistry.resolveConfigPaths(uAnnotation)
+        val targets = paths.flatMap { findConfigKeyElements(project, it) }
         return targets.toTypedArray().ifEmpty { null }
     }
 

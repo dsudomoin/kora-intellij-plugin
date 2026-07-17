@@ -31,24 +31,16 @@ class YamlConfigGotoHandler : GotoDeclarationHandler {
 
         val fullPath = buildYamlKeyPath(keyValue) ?: return null
 
-        var result: Array<PsiElement>? = null
-        ProgressManager.getInstance().runProcessWithProgressSynchronously(
-            {
-                result = ReadAction.compute<Array<PsiElement>?, RuntimeException> {
-                    val configSourceTarget = ConfigPathResolver.resolveConfigKeyToMethod(project, fullPath)
-                    if (configSourceTarget != null) return@compute arrayOf(configSourceTarget)
+        // The platform already runs this handler off EDT, under a modal progress and inside a read
+        // action (ActionUtil#underModalProgress). A progress of our own would invokeAndWait from that
+        // read action — a deadlock risk the platform logs and blames on us.
+        val configSourceTarget = ConfigPathResolver.resolveConfigKeyToMethod(project, fullPath)
+        if (configSourceTarget != null) return arrayOf(configSourceTarget)
 
-                    val annotationTargets = KoraConfigAnnotationRegistry.findAnnotatedElements(project, fullPath)
-                    if (annotationTargets.isNotEmpty()) return@compute annotationTargets.toTypedArray()
+        val annotationTargets = KoraConfigAnnotationRegistry.findAnnotatedElements(project, fullPath)
+        if (annotationTargets.isNotEmpty()) return annotationTargets.toTypedArray()
 
-                    null
-                }
-            },
-            "Resolving config key...",
-            true,
-            project,
-        )
-        return result
+        return null
     }
 
 }
