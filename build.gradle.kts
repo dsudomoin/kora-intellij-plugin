@@ -29,9 +29,9 @@ dependencies {
         testFramework(TestFrameworkType.Platform)
 
         bundledPlugin("com.intellij.java")
+        bundledPlugin("com.intellij.modules.json")
         bundledPlugin("org.jetbrains.kotlin")
         bundledPlugin("org.jetbrains.plugins.yaml")
-        bundledPlugin("com.intellij.modules.json")
         plugin("org.jetbrains.plugins.hocon", "2026.1.1")
     }
 

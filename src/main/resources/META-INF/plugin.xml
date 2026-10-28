@@ -11,6 +11,7 @@
 
     <depends>com.intellij.modules.platform</depends>
     <depends>com.intellij.java</depends>
+    <depends>com.intellij.modules.json</depends>
     <depends>org.jetbrains.kotlin</depends>
     <depends>org.jetbrains.plugins.yaml</depends>
     <depends optional="true" config-file="hocon-support.xml">org.jetbrains.plugins.hocon</depends>
@@ -33,6 +34,16 @@
                 implementationClass="io.github.dsudomoin.koraplugin.config.ConfigSourceLineMarkerProvider"/>
         <codeInsight.lineMarkerProvider language="kotlin" order="last"
                 implementationClass="io.github.dsudomoin.koraplugin.config.ConfigSourceLineMarkerProvider"/>
+        <codeInsight.lineMarkerProvider language="JAVA" order="last"
+                implementationClass="io.github.dsudomoin.koraplugin.config.KafkaListenerLineMarkerProvider"/>
+        <codeInsight.lineMarkerProvider language="kotlin" order="last"
+                implementationClass="io.github.dsudomoin.koraplugin.config.KafkaListenerLineMarkerProvider"/>
+
+        <toolWindow id="Kora Structure"
+                anchor="left"
+                factoryClass="io.github.dsudomoin.koraplugin.endpoints.KoraEndpointsToolWindowFactory"
+                icon="/icons/koraStructureToolWindow.svg"
+                canCloseContents="false"/>
 
         <localInspection
                 language="UAST"

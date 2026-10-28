@@ -42,6 +42,12 @@ IntelliJ IDEA plugin for the [Kora Framework](https://kora-projects.github.io/ko
 - **Missing Kora DI provider** — no matching provider for injection parameter (enabled by default)
 - **Unknown Kora config key** — YAML key not referenced by `@ConfigSource` (disabled by default)
 
+**Kora Structure Tool Window**
+- HTTP endpoints from `@HttpController` / `@HttpRoute` and OpenAPI specs (`openapi/` directory), merged by verb and path
+- Kafka consumers (`@KafkaListener`) and producers (`@KafkaPublisher.Topic`), shown by config path
+- DB entities (`@Table` / `@EntityJdbc`)
+- Double-click navigates to the declaration
+
 ### Requirements
 
 - IntelliJ IDEA 2025.3+

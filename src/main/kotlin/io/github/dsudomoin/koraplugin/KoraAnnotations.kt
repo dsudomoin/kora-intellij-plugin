@@ -3,6 +3,8 @@ package io.github.dsudomoin.koraplugin
 object KoraAnnotations {
     const val COMPONENT = "ru.tinkoff.kora.common.Component"
     const val REPOSITORY = "ru.tinkoff.kora.database.common.annotation.Repository"
+    const val TABLE = "ru.tinkoff.kora.database.common.annotation.Table"
+    const val ENTITY_JDBC = "ru.tinkoff.kora.database.jdbc.EntityJdbc"
 
     /** Annotations that mark a class as a DI-provided component. */
     val COMPONENT_LIKE = listOf(COMPONENT, REPOSITORY)
@@ -21,6 +23,8 @@ object KoraAnnotations {
 
     // Kafka
     const val KAFKA_LISTENER = "ru.tinkoff.kora.kafka.common.annotation.KafkaListener"
+    const val KAFKA_PUBLISHER = "ru.tinkoff.kora.kafka.common.annotation.KafkaPublisher"
+    const val KAFKA_PUBLISHER_TOPIC = "ru.tinkoff.kora.kafka.common.annotation.KafkaPublisher.Topic"
 
     // Scheduling
     const val SCHEDULE_AT_FIXED_RATE = "ru.tinkoff.kora.scheduling.common.annotation.ScheduleAtFixedRate"
@@ -39,7 +43,9 @@ object KoraAnnotations {
     const val CACHE_PUT = "ru.tinkoff.kora.cache.annotation.CachePut"
     const val CACHE_INVALIDATE = "ru.tinkoff.kora.cache.annotation.CacheInvalidate"
 
-    // HTTP Client
+    // HTTP
+    const val HTTP_CONTROLLER = "ru.tinkoff.kora.http.server.common.annotation.HttpController"
+    const val HTTP_ROUTE = "ru.tinkoff.kora.http.common.annotation.HttpRoute"
     const val HTTP_CLIENT = "ru.tinkoff.kora.http.client.common.annotation.HttpClient"
 
     // JSON
